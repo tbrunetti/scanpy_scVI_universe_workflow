@@ -1,0 +1,24 @@
+[project]
+name = "scanpy-sci-universe-04022026"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "diffxpy>=0.7.4",
+    "jupyter>=1.1.1",
+    "memory-profiler>=0.61.0",
+    "pandas>=3.0.3",
+    "pyarrow>=23.0.1",
+    "pyclustree>=0.4.1",
+    "pyscdblfinder>=0.1.0",
+    "scanpy>=1.12",
+    "scvi-tools[cuda,optional,tutorials]>=0.20.3",
+    "sparse>=0.18.0",
+]
+
+[tool.uv]
+override-dependencies = [
+    "anndata==0.12.16",
+    "pandas>=3.0.3"
+]
