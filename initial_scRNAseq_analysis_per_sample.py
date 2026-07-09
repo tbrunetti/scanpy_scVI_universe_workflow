@@ -1,3 +1,5 @@
+from jsonschema.benchmarks.subcomponents import v
+from matplotlib.pylab import sca
 import sys
 import os
 import pathlib
@@ -316,8 +318,9 @@ def add_qcmetrics_and_metadata(anndata_obj:AnnData, env_vars:dict, mito_regex:st
 
      # estimate doublets - not yet removed
      logging.info("Predicting singlets vs doublets in the dataset.")
-     scdblfinder_obj = pyscdblfinder.ScDblFinder(anndata_obj, random_state=seed)
+     scdblfinder_obj = pyscdblfinder.ScDblFinder(anndata_obj, random_state=seed) # automatically addess class and score columns to the anndata_obj that is passed into the function
      scdblfinder_obj.run(dbr=doublet_rate) 
+
      env_vars["double_rate_param"] = doublet_rate
      env_vars["scdblfinder_object"] = pathlib.Path("".join(["workspace_files/unfiltered_scdblfinder_obj_", env_vars["save_prefix"], "_", env_vars["date"], ".pkl"]))
 
@@ -326,23 +329,17 @@ def add_qcmetrics_and_metadata(anndata_obj:AnnData, env_vars:dict, mito_regex:st
           pickle.dump(scdblfinder_obj, object_file)
      
      try:
-          env_vars[['predicted_singlets']] = scdblfinder_obj.adata.obs["scDblFinder_class"].value_counts()["singlet"]
+          env_vars['predicted_singlets'] = scdblfinder_obj.adata.obs["scDblFinder_class"].value_counts()["singlet"]
      except KeyError:
           logging.critical("Singlet cells not found. There is a critical error in your dataset.")
-          env_vars[['predicted_singlets']] = 0
+          env_vars['predicted_singlets'] = 0
           sys.exit()
      try:
-          env_vars[['predicted_doublets']] = scdblfinder_obj.adata.obs["scDblFinder_class"].value_counts()["doublet"]
+          env_vars['predicted_doublets'] = scdblfinder_obj.adata.obs["scDblFinder_class"].value_counts()["doublet"]
      except KeyError:
           logging.warning("No doublets detected in the data set.  This is unusual and you may want to take a deeper dive into your input data or double rate parameter.")
-          env_vars[['predicted_doublets']] = 0
+          env_vars['predicted_doublets'] = 0
      
-     # merge doublet metadata information into anndata object
-     logging.info("Merging single/doublet prediction columns into anndata.obs metadata.")
-     anndata_obj.obs = anndata_obj.obs.join(scdblfinder_obj.adata.obs[["scDblFinder_score", "scDblFinder_class"]], how="left") # join defaults to joining my index match
-
-
-
      # if users has metadata parameter populated, add all metadata listed to annData cell level metadata
      if add_metadata != None:
           logging.info("Adding user provided cell level metadata to the .obs data slot of anndata object.")
@@ -443,7 +440,7 @@ def qc_figures(anndata_obj:AnnData, env_vars:dict, status:str) -> None:
      plt.tight_layout()
      plt.savefig("qc_images/{}_summary_joint.png".format(status), dpi=300)
      #plt.show()
-
+ 
 
      # highlighting singlets vs doublets
      fig, ax = plt.subplots()
@@ -473,28 +470,173 @@ def qc_figures(anndata_obj:AnnData, env_vars:dict, status:str) -> None:
      ax.legend()
      plt.tight_layout()
      plt.savefig("qc_images/{}_doublet_summary_joint.png".format(status), dpi=300)
-     plt.show()
+     # plt.show()
 
 @profile
-def cell_filtering(anndata_obj:AnnData, env_vars:dict) -> tuple(AnnData, dict):
-     scanpy.pp.filter_cells(anndata_obj, min_counts=env_vars["min_umi_counts"], 
-                            min_genes=env_vars["min_unique_genes"], 
-                            max_counts=env_vars["max_umi_counts"], 
-                            max_genes=env_vars["max_unique_genes"], 
-                            inplace = True)
+def cell_filtering(anndata_obj:AnnData, env_vars:dict, min_counts:int | None = None, min_genes:int | None = None, max_counts:int | None = None, max_genes:int | None = None, max_mito:float| None = None) -> tuple(AnnData, dict):
+
+     # store the number of cells before and after filtering in env_vars 
+     env_vars["total_cells_prefilter"] = len(anndata_obj.obs.index)
+     env_vars["total_genes_prefilter"] = len(anndata_obj.var.index)
+
+     if min_counts != None:
+          scanpy.pp.filter_cells(anndata_obj, min_counts=min_counts, inplace = True)
+     if min_genes != None:
+          scanpy.pp.filter_cells(anndata_obj, min_genes=min_genes, inplace = True)
+     if max_counts != None:
+          scanpy.pp.filter_cells(anndata_obj, max_counts=max_counts, inplace = True)
+     if max_genes != None:
+          scanpy.pp.filter_cells(anndata_obj, max_genes=max_genes, inplace = True)
      
      # Keep cells that have < mito_contam percent
-     anndata_obj = anndata_obj[anndata_obj.obs['pct_counts_is_mito'] < env_vars["mito_contam"], :]
+     anndata_obj = anndata_obj[anndata_obj.obs['pct_counts_is_mito'] < max_mito, :]
+
+     # store the number of cells after filtering in env_vars 
+     env_vars["total_cells_remaining_postfilter"] = len(anndata_obj.obs.index)
+     env_vars["total_genes_remaining_postfilter"] = len(anndata_obj.var.index)
+
+     
+     # save h5ad; file type is inferred from filename extension
+     anndata_obj.write(filename = os.path.join(env_vars["workingDir"], "h5ad_objects", "filtered_gene_symbol_{}_{}.h5ad".format(env_vars["save_prefix"], env_vars["date"])),
+                       convert_strings_to_categoricals = True,
+                       compression = "gzip")
+     
+     # save additions to env_vars workspace file metadata
+     with open(pathlib.Path("".join(["workspace_files/vars_and_params_", env_vars["save_prefix"], "_", env_vars["date"], ".pkl"])), "wb") as f:
+          pickle.dump(env_vars, f)
+
+
+     return anndata_obj, env_vars
+
+
+# when if size_factor is set to None, then scanpy's default depth normalization of median total counts
+# if want to normalize to 10k, then set to 10000, if want CPM normalization then set to 1000000
+# normalization if then followed by a log transformation +1 pseudocount
+# save_memory is a boolean to save memory footprint of storing the whole array in memory vs chunks of the array at a time
+# this does not parallelize, still single threaded, just sotred the dense values as needed
+# if save_memory is True, data_chunk_size is required and that roughly equates to the bumber of cells per batch to split the array for memory saving purposes
+# if save_memory is False then data_chunk_size is set to None as the parameter does not matter; full array is stored in memory
+@profile
+def normalize_and_transform(anndata_obj:AnnData, env_vars:dict, size_factor: int | None = None, save_memory:bool = False, data_chunk_size:int|None = None):
+     # save a copy of the raw counts to the counts layer (X is the active layer and when normalization is applied it applies to X)
+     anndata_obj.layers['counts'] = anndata_obj.X.copy()
+     scanpy.pp.normalize_total(anndata_obj, target_sum = None, layer = None, exclude_highly_expressed = False, inplace = True)
+     scanpy.pp.log1p(anndata_obj, base = None, chunked = None, chunk_size = None, layer = None)
+
+     # save h5ad; file type is inferred from filename extension
+     anndata_obj.write(filename = os.path.join(env_vars["workingDir"], "h5ad_objects", "filtered_gene_symbol_{}_{}.h5ad".format(env_vars["save_prefix"], env_vars["date"])),
+                       convert_strings_to_categoricals = True,
+                       compression = "gzip")
+     
+     # save additions to env_vars workspace file metadata
+     env_vars['normalization_scale_factor'] = size_factor
+     with open(pathlib.Path("".join(["workspace_files/vars_and_params_", env_vars["save_prefix"], "_", env_vars["date"], ".pkl"])), "wb") as f:
+          pickle.dump(env_vars, f)
+     
+     return anndata_obj, env_vars
+     
+@profile
+def calculate_cell_cycle(anndata_obj:AnnData, env_vars:dict, s_genes:Iterable[str], g2m_genes:Interable[str]):
+     scanpy.tl.score_genes_cell_cycle(anndata_obj, s_genes=s_genes, g2m_genes=g2m_genes)
+     return anndata_obj, env_vars
+
+@profile     
+def identify_and_transform_hvgs(anndata_obj:AnnData, env_vars:dict, n_hvgs:int, vars_to_regress:Iterable[str], threads:int): 
+     '''
+     FROM SCANPY DOCS FOR: scanpy.pp.highly_variable_genes()
+     The following may help when comparing to Seurat’s naming: If batch_key=None and flavor='seurat', 
+     this mimics Seurat’s FindVariableFeatures(…, method='mean.var.plot'). If batch_key=None and 
+     flavor='seurat_v3'/flavor='seurat_v3_paper', this mimics Seurat’s FindVariableFeatures(..., method='vst'). 
+     If batch_key is not None and flavor='seurat_v3_paper', this mimics Seurat’s SelectIntegrationFeatures.
+     https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.highly_variable_genes.html#scanpy.pp.highly_variable_genes
+     '''   
+     # hvgs are returned in .var
+     scanpy.pp.highly_variable_genes(anndata_obj, n_top_genes=n_hvgs, flavor = "seurat", filter_unexpressed_genes = False, batch_key=None, inplace = True) # note, chose to stick to always Seurat method to reduce complexity; other options are seurat_v3 which we should avoid and cell_ranger; also batch is always None here because it is for independent samples so there will not be a batch
+     anndata_obj.layers["normalized"] = anndata_obj.X.copy() # keep a copy of the just the normalized transformed data before regression and scaling (X is the active layer)
+     scanpy.pp.regress_out(anndata_obj, keys = vars_to_regress, n_jobs = threads)
+     scanpy.pp.scale(anndata_obj, max_value=None, zero_center = True)
+
+  
+     # for HVG, set genes to false that are part of B cell clonotypes
+     # gets hvg list of top x most variable genes and has
+     ig_genes_to_ignore_for_clustering = anndata_obj.var[anndata_obj.var.index.str.contains(r'^IG[HKL]([VJ]|V[IVX]+|D[0-9])', regex=True)].index.tolist() #list of all genes that should be removed from HVG
+     # ensures that if this list is empty it won't throw any errors due to list being empty;
+     if len(ig_genes_to_ignore_for_clustering) > 0:
+          anndata_obj.var.loc[ig_genes_to_ignore_for_clustering, "highly_variable"] = False # set all of these genes to False under the highly variable column
+          env_vars['Ig_genes_ignored_for_hvg'] = ig_genes_to_ignore_for_clustering
+     else:
+          env_vars['Ig_genes_ignored_for_hvg'] = "None" # keeping as None string not None object, as this is just human-readable metadata to keep track of methods
+
+
+     # plot HVGs and save in qc_images subdirectory
+     scanpy.pl.highly_variable_genes(anndata_obj, log = False, highly_variable_genes=True, save =  pathlib.Path("qc_images") / f'{env_vars["save_prefix"]}_hvg.png')
+
+
+     # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
+     #anndata_obj.layers["regressed_scaled"] = anndata_obj.X.toarray()
+     anndata_obj.write(filename = os.path.join(env_vars["workingDir"], "h5ad_objects", "filtered_gene_symbol_{}_{}.h5ad".format(env_vars["save_prefix"], env_vars["date"])),
+                       convert_strings_to_categoricals = True,
+                       compression = "gzip")
+     
+     env_vars["n_top_hvg"] = n_hvgs
+     env_vars["vars_to_regress"] = vars_to_regress
+     with open(pathlib.Path("".join(["workspace_files/vars_and_params_", env_vars["save_prefix"], "_", env_vars["date"], ".pkl"])), "wb") as f:
+          pickle.dump(env_vars, f)
      
      return anndata_obj, env_vars
 
-@profile
-def normalization():
-     pass
+
+@profile  
+def pca(anndata_obj:AnnData, env_vars:dict, seed:int):
+     '''
+     FROM SCANPY DOCS FOR: scanpy.pp.pca()
+     when svd_solver = auto, choose automatically depending on the size of the problem: Will use 'full' 
+     for small shapes and 'randomized' for large shapes.
+     the embedding is stored as obsm['X_pca'] (PCA representation data), 
+     the loadings as varm['PCs'] (gene loadings), and the the parameters in 
+     uns['pca']['variance_ratio'] (ratio of variance explained, 
+     uns['pca']['variance'] (explained variance; equalivalent to eigenvalues of the covariance matrix)
+     https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.pca.html#scanpy.pp.pca
+     '''
+     scanpy.pp.pca(anndata_obj, n_comps = 50, zero_center = True, svd_solver = 'auto', use_highly_variable=True, random_state = seed, chunked = False, layer = None) # layer=None means to use the values in the active layer (.X) for the PCA
+     # plot elbow plot
+     scanpy.pl.pca_variance_ratio(anndata_obj, n_pcs=50, log=True, save = Path("qc_images") / f'{env_vars["save_prefix"]}_pca_elbow_plot_of_hvgs.png')
+     # plot pc loadings - top hvgs driving each PC
+     scanpy.pl.pca_loadings(anndata_obj, components = '1,2,3,4,5,6,7,8,9', include_lowest = True, save = Path("qc_images") / f'{env_vars["save_prefix"]}_pca_gene_loadings_of_hvgs.png' ) # include_lowest means to show the features that have the highest and lowest loadings
+
+
+     #TODO
+     # store number of PCs to use for clustering in env_vars
+     '''
+     R version of determining how many PCs to use
+     pct <- filtered_seurat_obj[["pca"]]@stdev / sum(filtered_seurat_obj[["pca"]]@stdev) * 100
+     pcs <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > pca_var_change), decreasing = T)[1] + 1
+     '''
+     
+     # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
+     # but there will be added PCA calculations and data to obsm, varm, and uns
+     anndata_obj.write(filename = os.path.join(env_vars["workingDir"], "h5ad_objects", "filtered_gene_symbol_{}_{}.h5ad".format(env_vars["save_prefix"], env_vars["date"])),
+                       convert_strings_to_categoricals = True,
+                       compression = "gzip")
+     
+     with open(pathlib.Path("".join(["workspace_files/vars_and_params_", env_vars["save_prefix"], "_", env_vars["date"], ".pkl"])), "wb") as f:
+          pickle.dump(env_vars, f)
+     
+     return anndata_obj, env_vars
+
 
 @profile
-def clustering_dim_red():
-     pass
+def clustering_dim_red(anndata_obj:AnnData, env_vars:dict, n_neighbors:int, n_pcs:int, dist_metric:str, seed:int):
+     '''
+     FROM SCANPY DOCS FOR: scanpy.pp.neighbors()
+     If not specified, the neighbors data is stored in .uns['neighbors'], distances and connectivities are stored in .obsp['distances'] and 
+     .obsp['connectivities'] respectively. If specified, the neighbors data is added to .uns[key_added], distances are stored in 
+     .obsp[f'{key_added}_distances'] and connectivities in .obsp[f'{key_added}_connectivities'].
+     https://scanpy.readthedocs.io/en/stable/api/generated/scanpy.pp.neighbors.html#scanpy.pp.neighbors
+     '''
+     scanpy.pp.neighbors(anndata_obj, n_neighbors=n_neighbors, n_pcs = n_pcs, knn=True, method="umap", metric = dist_metric, random_state = seed)
+
+     return anndata_obj, env_vars
 
 
 
@@ -534,37 +676,70 @@ if __name__ == "__main__":
      newProj_parser = subparser.add_parser("newProject") # if user selects newProject, then newProj parser arguments become available
      resume_parser = subparser.add_parser("resume") # if user selects resume, then resume parser arguments become available
 
-     newProj_parser.add_argument("--working_dir", default=os.getcwd(), type = pathlib.Path)
-     newProj_parser.add_argument("--save_prefix", default="", type = str)
-     newProj_parser.add_argument("--filtered_feature_bc_matrix", type = pathlib.Path, help = "path to counts matrix, barcodes file, and feature/gene files")
-     newProj_parser.add_argument("--sample_name", type = str)
-     newProj_parser.add_argument("--min_cells_expressed", default = 0, type = int, help = "Keep genes only if they are expressed in X number of cells.  The default is 0 and genes are not removed (recommended).")
-     newProj_parser.add_argument("--min_unique_genes", default = 300, type = int, help = "Filter out any cells that do not have at least x number of unique genes expressed.  Default: 300 genes")
-     newProj_parser.add_argument("--min_umi_counts", default = 500, type = int, help = "Filter out any cells that do not have at least x number of UMIs/reads in the cells.  Default: 500.")
-     newProj_parser.add_argument("--mito_contam", default= 10, type = float, help = "Filter out any cells that have a x percent of reads expressed in mitochondrial genes.  Generally a good inidcation of cell death. Default: 10")
-     newProj_parser.add_argument("--max_unique_genes", default = None, type = int, help = "Filter out any cells that have more than x number of unique genes expressed.  Default: None, this upper limit is not applied.")
-     newProj_parser.add_argument("--max_umi_counts", default = None, type = int, help = "Filter out any cells that have more than x number of UMIs/reads in the cell.  Default: None, this upper limit is not applied.")
-     newProj_parser.add_argument("--min_complexity", default = 0.8, type = float)
-     newProj_parser.add_argument("--hvg_features", default = 2000, type = int)
-     newProj_parser.add_argument("--pca_var_change", default = 0.10, type = float)
-     newProj_parser.add_argument("--neighbors", default = 30, type = int)
-     newProj_parser.add_argument("--resolutions", default=[0.2, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0], nargs = "+", type = float)
+     # --- Subcommand: newProject ---
+     env_setup_group = newProj_parser.add_argument_group("Environment and project setup options")
+     env_setup_group.add_argument("--working_dir", default=os.getcwd(), type = pathlib.Path)
+     env_setup_group.add_argument("--save_prefix", default="", type = str)
+     env_setup_group.add_argument("--filtered_feature_bc_matrix", type = pathlib.Path, help = "path to counts matrix, barcodes file, and feature/gene files")
+     env_setup_group.add_argument("--sample_name", type = str)
+     env_setup_group.add_argument("--convertEnsembl", action = "store_true", help = "if this flag is set, will collapse Ensembl IDs to human readable gene IDs")
+     env_setup_group.add_argument("--platform", choices = ["parse", "10x", "bdrhapsody"])
+     env_setup_group.add_argument("--metadata", default = None, nargs = "+", type = convert_to_tuple, help = "Ex: --metadata sex=female batch=A tissue=spleen age=100 group=\"Control group\"") # each time a key value pair is listed, it converts to a tuple and the tuple will be collected as a list based on argparse nargs
+     env_setup_group.add_argument("--seed", default = 42, type = int, help = "When algorithms are non-deterministic, this is the seed that be used for reproducibility purposes."
+     env_setup_group.add_argument("--threads", default = 5, type = int, help = "The number of parallel processes to spawn off when a function can be parallelized.")
+
+     ## cell filtering and QC options
+     filtering_group = newProj_parser.add_argument_group("Cell filtering and QC options")
+     filtering_group.add_argument("--min_cells_expressed", default = 0, type = int, help = "Keep genes only if they are expressed in X number of cells.  The default is 0 and genes are not removed (recommended).")
+     filtering_group.add_argument("--min_unique_genes", default = 300, type = int, help = "Filter out any cells that do not have at least x number of unique genes expressed.  Default: 300 genes")
+     filtering_group.add_argument("--min_umi_counts", default = 500, type = int, help = "Filter out any cells that do not have at least x number of UMIs/reads in the cells.  Default: 500.")
+     filtering_group.add_argument("--mito_contam", default= 10, type = float, help = "Filter out any cells that have a x percent of reads expressed in mitochondrial genes.  Generally a good inidcation of cell death. Default: 10")
+     filtering_group.add_argument("--max_unique_genes", default = None, type = int, help = "Filter out any cells that have more than x number of unique genes expressed.  Default: None, this upper limit is not applied.")
+     filtering_group.add_argument("--max_umi_counts", default = None, type = int, help = "Filter out any cells that have more than x number of UMIs/reads in the cell.  Default: None, this upper limit is not applied.")
+     filtering_group.add_argument("--min_complexity", default = 0.8, type = float)
+     filtering_parser.add_argument("--mito_regex", default = "MT-", type = str)
+     filtering_parser.add_argument("--ribo_regex", default = ["RPL", "RPS"], nargs= "+", type = str)
+     filtering_parser.add_argument("--dbl_rate", default = "0.076", type = float32, help = "Look up the doublet detection rate expecation for the technology you are using; for Parse in 2026, it was estimated to be <3% see ParseBioScience_What_is_the_expected_doublet_rate_Support_Suite.html in supplemental_files, so you can set this to 0.03; 10x doublet rate is ~7.6% for 10,000 cells captured/sequenced and it is depenent on the numberof cells captured, so refer to 10x-How-To-Technical-Seminar_Sample-Prep.pdf under supplemental_files to determine this value for 10x. BD Rhapsody, see BD-Rhapsody-HT-Single-Cell-Analysis-System-Instrument-User-Guide_page33.pdf page 33 in supplemental_files, but estimated about 1.7% for 10k or 3.7% for 20k cells.  The default is 10x at 10,000 cells of 7.6% = 0.076."
+   
+
+     ## normalization and transformation options
+     normalization_group = newProj_parser.add_argument_group("Normalization/Transformation options")
+     normalization_group.add_argument("--size_factor, default = None, type = int, help = "If size_factor is set to None, then scanpy's default depth normalization of median total counts is used.  Otherwise, this can be set to an integer to depth normalize.  CPM normalization would mean setting this value to 1000000, or to mimic Seurat's depth normalization, set this value to 10000")
+     normalization_group.add_argument("--save_memory", action = "store_true", help = "A boolean to save memory footprint of storing the whole array in memory vs chunks of the array at a time. This does not parallelize, still single threaded, just sotred the dense values as needed."
+     normalization_group.add_argument("--data_chunk_size", type = int, default = None, help ="If --save_memory" flag is set, the paramter is required to be set to an int.  The int roughly represents the number of cells you want processed at a time to reduce memory footprint - will not accelerate via parallelization")
+     normalization_group.add_argument("--n_hvgs", default = 2000, type = int, help = "The number of highly variable genes to select from the dataset for use in PCA.")
+     normalization_group.add_argument("--regress_vars", default = ["total_counts", "pct_counts_mt"], nargs = "+",  help ="a space-delimited list of strings to regress out; total_counts and pct_counts_mt are calculated in the pipeline and regressed by default but any metadata field can be added here as well.  Note, if the default and the metadata field of sex for example is to be regress is should be specifed as: --regress-vars total_counts pct_counts_mt sex")
+     normalization_group.add_argument("--hvg_ignore", default = "^IG[HKL]([VJ]|V[IVX]+|D[0-9])",  help ="a regex that identifies genes to ignore in HVG selection to prevent biasing clustering; For human, the following is recommended for B cell subclustering to prevent clustering bias by clonotype: ^IG[HKL]([VJ]|V[IVX]+|D[0-9]), for mouse, the following is recommended: ^Ig[hkl][vj]|^Ighd[0-9]. WARNING!! Place regex inbetween quotes to prevent shell/bash from interpreting special characters such a | as a pipe!  However, any regex is supported and will flag genes that match the regex to be ignored during selection of HVG.")
+
+
+
+     ## clustering and dimensionality reduction options 
+     clustering_dimred_group = newProj_parser.add_argument_group("Clustering and dimensionality reduction options")
+     clustering_dimred_group.add_argument("--hvg_features", default = 2000, type = int)
+     clustering_dimred_group.add_argument("--pca_var_change", default = 0.10, type = float)
+     clustering_dimred_group.add_argument("--neighbors", default = 30, type = int)
+     clustering_dimred_group.add_argument("--resolutions", default=[0.2, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0], nargs = "+", type = float)
+
+
      newProj_parser.add_argument("--top_genes_per_cluster_to_plot", default = 5, type = int)
      newProj_parser.add_argument("--additional_genes_to_plot", default=["CD3E", "CD3D", "CD4", "CD8A", "CD8B", "CD19", "MS4A1", "CD79A", "CD79B"], nargs = "+", type = str)
-     newProj_parser.add_argument("--convertEnsembl", action = "store_true")
-     newProj_parser.add_argument("--platform", choices = ["parse", "10x", "bdrhapsody"])
-     newProj_parser.add_argument("--metadata", default = None, nargs = "+", type = convert_to_tuple, help = "Ex: --metadata sex=female batch=A tissue=spleen age=100 group=\"Control group\"") # each time a key value pair is listed, it converts to a tuple and the tuple will be collected as a list based on argparse nargs
-     newProj_parser.add_argument("--mito_regex", default = "MT-", type = str)
-     newProj_parser.add_argument("--ribo_regex", default = ["RPL", "RPS"], nargs= "+", type = str)
-     newProj_parser.add_argument("--dbl_rate", default = "0.076", type = float32, help = "Look up the doublet detection rate expecation for the technology you are using; for Parse in 2026, it was estimated to be <3% see ParseBioScience_What_is_the_expected_doublet_rate_Support_Suite.html in supplemental_files, so you can set this to 0.03; 10x doublet rate is ~7.6% for 10,000 cells captured/sequenced and it is depenent on the numberof cells captured, so refer to 10x-How-To-Technical-Seminar_Sample-Prep.pdf under supplemental_files to determine this value for 10x. BD Rhapsody, see BD-Rhapsody-HT-Single-Cell-Analysis-System-Instrument-User-Guide_page33.pdf page 33 in supplemental_files, but estimated about 1.7% for 10k or 3.7% for 20k cells.  The default is 10x at 10,000 cells of 7.6% = 0.076."
-     newProj_parser.add_argument("--seed", default = 42, type = int, help = "When algorithms are non-deterministic, this is the seed that be used for reproducibility purposes."
-
-
+  
+     # --- Subcommand: resume ---
      resume_parser.add_argument("--env_vars_config", required = True, type  = pathlib.Path)
      resume_parser.add_argument("--update_working_dir", default = None, type = pathlib.Path, help = "This needs to be the full path to there the file structure of h5ad_objects/, workspace_files/, qc_images/, cluster_analysis/ live")
      args = parser.parse_args()
 
+
+
+
      #TODO:
+     # parser validation
      #need logic to make sure this holds true
      #min_umi_counts <= x <= max_umi_counts
+     
+     # Post-parse validation
+     if args.save_memory and args.data_chunk_size is None:
+          parser.error("--data_chunk_size is required when --save_memory is set.")
+     if not args.save_memory and args.data_chunk_size is not None:
+          parser.error("--chunk_size can only be specified when --save_memory is set.")
 '''
