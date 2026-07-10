@@ -541,7 +541,7 @@ def calculate_cell_cycle(anndata_obj:AnnData, env_vars:dict, s_genes:Iterable[st
      return anndata_obj, env_vars
 
 @profile     
-def identify_and_transform_hvgs(anndata_obj:AnnData, env_vars:dict, n_hvgs:int, vars_to_regress:Iterable[str], threads:int): 
+def identify_and_transform_hvgs(anndata_obj:AnnData, env_vars:dict, n_hvgs:int, hvg_ignore:str, vars_to_regress:Iterable[str], threads:int): 
      '''
      FROM SCANPY DOCS FOR: scanpy.pp.highly_variable_genes()
      The following may help when comparing to Seurat’s naming: If batch_key=None and flavor='seurat', 
@@ -559,13 +559,13 @@ def identify_and_transform_hvgs(anndata_obj:AnnData, env_vars:dict, n_hvgs:int, 
   
      # for HVG, set genes to false that are part of B cell clonotypes
      # gets hvg list of top x most variable genes and has
-     ig_genes_to_ignore_for_clustering = anndata_obj.var[anndata_obj.var.index.str.contains(r'^IG[HKL]([VJ]|V[IVX]+|D[0-9])', regex=True)].index.tolist() #list of all genes that should be removed from HVG
+     genes_to_ignore_for_clustering = anndata_obj.var[anndata_obj.var.index.str.contains(hvg_ignore, regex=True)].index.tolist() #list of all genes that should be removed from HVG
      # ensures that if this list is empty it won't throw any errors due to list being empty;
-     if len(ig_genes_to_ignore_for_clustering) > 0:
-          anndata_obj.var.loc[ig_genes_to_ignore_for_clustering, "highly_variable"] = False # set all of these genes to False under the highly variable column
-          env_vars['Ig_genes_ignored_for_hvg'] = ig_genes_to_ignore_for_clustering
+     if len(genes_to_ignore_for_clustering) > 0:
+          anndata_obj.var.loc[genes_to_ignore_for_clustering, "highly_variable"] = False # set all of these genes to False under the highly variable column
+          env_vars['genes_ignored_for_hvg_selection'] = genes_to_ignore_for_clustering
      else:
-          env_vars['Ig_genes_ignored_for_hvg'] = "None" # keeping as None string not None object, as this is just human-readable metadata to keep track of methods
+          env_vars['genes_ignored_for_hvg_selection'] = "None" # keeping as None string not None object, as this is just human-readable metadata to keep track of methods
 
 
      # plot HVGs and save in qc_images subdirectory
@@ -587,32 +587,47 @@ def identify_and_transform_hvgs(anndata_obj:AnnData, env_vars:dict, n_hvgs:int, 
 
 
 @profile  
-def pca(anndata_obj:AnnData, env_vars:dict, seed:int):
+def pca(anndata_obj:AnnData, env_vars:dict, pca_var_change:float, seed:int):
      '''
      FROM SCANPY DOCS FOR: scanpy.pp.pca()
      when svd_solver = auto, choose automatically depending on the size of the problem: Will use 'full' 
      for small shapes and 'randomized' for large shapes.
      the embedding is stored as obsm['X_pca'] (PCA representation data), 
      the loadings as varm['PCs'] (gene loadings), and the the parameters in 
-     uns['pca']['variance_ratio'] (ratio of variance explained, 
+     uns['pca']['variance_ratio'] (ratio of variance explained), 
      uns['pca']['variance'] (explained variance; equalivalent to eigenvalues of the covariance matrix)
      https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.pca.html#scanpy.pp.pca
      '''
-     scanpy.pp.pca(anndata_obj, n_comps = 50, zero_center = True, svd_solver = 'auto', use_highly_variable=True, random_state = seed, chunked = False, layer = None) # layer=None means to use the values in the active layer (.X) for the PCA
-     # plot elbow plot
-     scanpy.pl.pca_variance_ratio(anndata_obj, n_pcs=50, log=True, save = Path("qc_images") / f'{env_vars["save_prefix"]}_pca_elbow_plot_of_hvgs.png')
+     scanpy.pp.pca(anndata_obj, n_comps = 50, zero_center = True, svd_solver = 'auto',  mask_var="highly_variable", random_state = seed, chunked = False, layer = None) # layer=None means to use the values in the active layer (.X) for the PCA
+     # plot elbow plot/
+     scanpy.pl.pca_variance_ratio(anndata_obj, n_pcs=50, log=True, save = pathlib.Path("qc_images") / f'{env_vars["save_prefix"]}_pca_elbow_plot_of_hvgs.png')
      # plot pc loadings - top hvgs driving each PC
-     scanpy.pl.pca_loadings(anndata_obj, components = '1,2,3,4,5,6,7,8,9', include_lowest = True, save = Path("qc_images") / f'{env_vars["save_prefix"]}_pca_gene_loadings_of_hvgs.png' ) # include_lowest means to show the features that have the highest and lowest loadings
+     scanpy.pl.pca_loadings(anndata_obj, components = '1,2,3,4,5,6,7,8,9,10', include_lowest = True, save = pathlib.Path("qc_images") / f'{env_vars["save_prefix"]}_pca_gene_loadings_of_hvgs.png') # include_lowest means to show the features that have the highest and lowest loadings
 
+     #################################################################
+     ##### store number of PCs to use for clustering in env_vars #####
+     #################################################################
+     # convert to numpy array so can take advantage of the efficent diff function in numpy that subtracts and store the diffrence of consecutive values in an array
+     pct_var_explained = numpy.asarray((gene_sym_anndata_obj.uns['pca']['variance_ratio'])/(gene_sym_anndata_obj.uns['pca']['variance_ratio'].sum())*100)
+     change_in_var = -numpy.diff(pct_var_explained)  # diffs[i] = pct_var[i] - pct_var[i+1], the (-) is multiplying it by -1, since normally we want to calc  pct_var[i+1] - pct_var[i], but default is 1st value - 2nd value, so just multiply by -1 to make the values non-negative
 
-     #TODO
-     # store number of PCs to use for clustering in env_vars
+     # returns the first PC where the change in varinces is less than thte change specified by user
      '''
-     R version of determining how many PCs to use
-     pct <- filtered_seurat_obj[["pca"]]@stdev / sum(filtered_seurat_obj[["pca"]]@stdev) * 100
-     pcs <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > pca_var_change), decreasing = T)[1] + 1
+     np.argmax() on a boolean array is a common trick to find the first index where a condition is True, without writing an explicit loop.
+     Why it works: change_in_var < 0.1 produces a boolean array ([False, False, True, True, ...]). Python treats True as 1 and False as 0. 
+     argmax() returns the index of the first occurrence of the maximum value in an array — and since True (1) is the max possible value in 
+     a boolean array, argmax() finds the first True, i.e. the first index satisfying your condition. It's a fast, vectorized way to do 
+     "find first index where X" without a Python-level loop.
      '''
-     
+     idx = numpy.argmax(change_in_var < pca_var_change)  # first True index (note our numpy array is naturally sorted), or 0 if none are True
+     # the if/else logic is only necessary to confirm argmax wored and then to add 2 to the index number in order to return the correct PC cutoff; this is because python is 0 indexed, and we want to go 1 past the index to get the index to get the proper value, hence +2
+     if change_in_var[idx] < pca_var_change:
+          env_vars["pcs_to_use"] = f'PC{idx+2}'
+     else:
+          env_vars["pcs_to_use"] = f'PC{len(change_in_var)+1}' #if there are no PCs that meet the criteria, use all PCs calculated
+
+    
+
      # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
      # but there will be added PCA calculations and data to obsm, varm, and uns
      anndata_obj.write(filename = os.path.join(env_vars["workingDir"], "h5ad_objects", "filtered_gene_symbol_{}_{}.h5ad".format(env_vars["save_prefix"], env_vars["date"])),
@@ -716,7 +731,7 @@ if __name__ == "__main__":
      ## clustering and dimensionality reduction options 
      clustering_dimred_group = newProj_parser.add_argument_group("Clustering and dimensionality reduction options")
      clustering_dimred_group.add_argument("--hvg_features", default = 2000, type = int)
-     clustering_dimred_group.add_argument("--pca_var_change", default = 0.10, type = float)
+     clustering_dimred_group.add_argument("--pca_var_change", default = 0.05, type = float)
      clustering_dimred_group.add_argument("--neighbors", default = 30, type = int)
      clustering_dimred_group.add_argument("--resolutions", default=[0.2, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0], nargs = "+", type = float)
 
