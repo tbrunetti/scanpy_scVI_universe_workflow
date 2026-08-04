@@ -1,3 +1,5 @@
+import scanpy
+from typing import Iterable
 from jsonschema.benchmarks.subcomponents import v
 from matplotlib.pylab import sca
 import sys
@@ -15,10 +17,13 @@ import seaborn
 import anndata
 import scanpy
 import argparse
+import pyclustree
 import pyscdblfinder # doublet detection library
 from memory_profiler import profile
 from time import time
 import logging
+import pymast
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -473,7 +478,8 @@ def qc_figures(anndata_obj:AnnData, env_vars:dict, status:str) -> None:
      # plt.show()
 
 @profile
-def cell_filtering(anndata_obj:AnnData, env_vars:dict, min_counts:int | None = None, min_genes:int | None = None, max_counts:int | None = None, max_genes:int | None = None, max_mito:float| None = None) -> tuple(AnnData, dict):
+def cell_filtering(anndata_obj:AnnData, env_vars:dict, remove_doublets:bool, min_counts:int | None = None, min_genes:int | None = None, max_counts:int | None = None, max_genes:int | None = None, max_mito:float| None = None) -> tuple(AnnData, dict):
+     logging.info("Cell level filtering")
 
      # store the number of cells before and after filtering in env_vars 
      env_vars["total_cells_prefilter"] = len(anndata_obj.obs.index)
@@ -491,6 +497,9 @@ def cell_filtering(anndata_obj:AnnData, env_vars:dict, min_counts:int | None = N
      # Keep cells that have < mito_contam percent
      anndata_obj = anndata_obj[anndata_obj.obs['pct_counts_is_mito'] < max_mito, :]
 
+     if remove_doublets == True:
+          anndata_obj = anndata_obj[anndata_obj.obs['scDblFinder_class'] == "singlet", :]
+     
      # store the number of cells after filtering in env_vars 
      env_vars["total_cells_remaining_postfilter"] = len(anndata_obj.obs.index)
      env_vars["total_genes_remaining_postfilter"] = len(anndata_obj.var.index)
@@ -517,7 +526,9 @@ def cell_filtering(anndata_obj:AnnData, env_vars:dict, min_counts:int | None = N
 # if save_memory is True, data_chunk_size is required and that roughly equates to the bumber of cells per batch to split the array for memory saving purposes
 # if save_memory is False then data_chunk_size is set to None as the parameter does not matter; full array is stored in memory
 @profile
-def normalize_and_transform(anndata_obj:AnnData, env_vars:dict, size_factor: int | None = None, save_memory:bool = False, data_chunk_size:int|None = None):
+def normalize_and_transform(anndata_obj:AnnData, env_vars:dict, size_factor: int | None = None, save_memory:bool = False, data_chunk_size:int|None = None) -> tuple(AnnData, dict):
+     logging.info("Normalization and transformation of counts")
+
      # save a copy of the raw counts to the counts layer (X is the active layer and when normalization is applied it applies to X)
      anndata_obj.layers['counts'] = anndata_obj.X.copy()
      scanpy.pp.normalize_total(anndata_obj, target_sum = None, layer = None, exclude_highly_expressed = False, inplace = True)
@@ -536,12 +547,14 @@ def normalize_and_transform(anndata_obj:AnnData, env_vars:dict, size_factor: int
      return anndata_obj, env_vars
      
 @profile
-def calculate_cell_cycle(anndata_obj:AnnData, env_vars:dict, s_genes:Iterable[str], g2m_genes:Interable[str]):
+def calculate_cell_cycle(anndata_obj:AnnData, env_vars:dict, s_genes:Iterable[str], g2m_genes:Interable[str]) -> tuple(AnnData, dict):
      scanpy.tl.score_genes_cell_cycle(anndata_obj, s_genes=s_genes, g2m_genes=g2m_genes)
      return anndata_obj, env_vars
 
 @profile     
-def identify_and_transform_hvgs(anndata_obj:AnnData, env_vars:dict, n_hvgs:int, hvg_ignore:str, vars_to_regress:Iterable[str], threads:int): 
+def identify_and_transform_hvgs(anndata_obj:AnnData, env_vars:dict, n_hvgs:int, hvg_ignore:str, vars_to_regress:Iterable[str], threads:int) -> tuple(AnnData, dict): 
+     logging.info("Scale data, regress covariates, and identify highly variable genes")
+
      '''
      FROM SCANPY DOCS FOR: scanpy.pp.highly_variable_genes()
      The following may help when comparing to Seurat’s naming: If batch_key=None and flavor='seurat', 
@@ -587,7 +600,9 @@ def identify_and_transform_hvgs(anndata_obj:AnnData, env_vars:dict, n_hvgs:int, 
 
 
 @profile  
-def pca(anndata_obj:AnnData, env_vars:dict, pca_var_change:float, seed:int):
+def pca(anndata_obj:AnnData, env_vars:dict, pca_var_change:float, seed:int) -> tuple(AnnData, dict):
+     logging.info("Running PCA")
+
      '''
      FROM SCANPY DOCS FOR: scanpy.pp.pca()
      when svd_solver = auto, choose automatically depending on the size of the problem: Will use 'full' 
@@ -608,7 +623,7 @@ def pca(anndata_obj:AnnData, env_vars:dict, pca_var_change:float, seed:int):
      ##### store number of PCs to use for clustering in env_vars #####
      #################################################################
      # convert to numpy array so can take advantage of the efficent diff function in numpy that subtracts and store the diffrence of consecutive values in an array
-     pct_var_explained = numpy.asarray((gene_sym_anndata_obj.uns['pca']['variance_ratio'])/(gene_sym_anndata_obj.uns['pca']['variance_ratio'].sum())*100)
+     pct_var_explained = numpy.asarray((anndata_obj.uns['pca']['variance_ratio'])/(anndata_obj.uns['pca']['variance_ratio'].sum())*100)
      change_in_var = -numpy.diff(pct_var_explained)  # diffs[i] = pct_var[i] - pct_var[i+1], the (-) is multiplying it by -1, since normally we want to calc  pct_var[i+1] - pct_var[i], but default is 1st value - 2nd value, so just multiply by -1 to make the values non-negative
 
      # returns the first PC where the change in varinces is less than thte change specified by user
@@ -622,9 +637,11 @@ def pca(anndata_obj:AnnData, env_vars:dict, pca_var_change:float, seed:int):
      idx = numpy.argmax(change_in_var < pca_var_change)  # first True index (note our numpy array is naturally sorted), or 0 if none are True
      # the if/else logic is only necessary to confirm argmax wored and then to add 2 to the index number in order to return the correct PC cutoff; this is because python is 0 indexed, and we want to go 1 past the index to get the index to get the proper value, hence +2
      if change_in_var[idx] < pca_var_change:
-          env_vars["pcs_to_use"] = f'PC{idx+2}'
+          env_vars["pcs_to_use"] = idx+2
+          logging.info("Total PCs to use: {}".format(env_vars["pcs_to_use"]))
      else:
-          env_vars["pcs_to_use"] = f'PC{len(change_in_var)+1}' #if there are no PCs that meet the criteria, use all PCs calculated
+          env_vars["pcs_to_use"] = len(change_in_var)+1 #if there are no PCs that meet the criteria, use all PCs calculated
+          logging.info("Total PCs to use: {}".format(env_vars["pcs_to_use"]))
 
     
 
@@ -634,6 +651,7 @@ def pca(anndata_obj:AnnData, env_vars:dict, pca_var_change:float, seed:int):
                        convert_strings_to_categoricals = True,
                        compression = "gzip")
      
+     env_vars["pca_var_change"] = pca_var_change
      with open(pathlib.Path("".join(["workspace_files/vars_and_params_", env_vars["save_prefix"], "_", env_vars["date"], ".pkl"])), "wb") as f:
           pickle.dump(env_vars, f)
      
@@ -641,7 +659,9 @@ def pca(anndata_obj:AnnData, env_vars:dict, pca_var_change:float, seed:int):
 
 
 @profile
-def clustering_dim_red(anndata_obj:AnnData, env_vars:dict, n_neighbors:int, n_pcs:int, dist_metric:str, seed:int):
+def neighbors_umap_clust(anndata_obj:AnnData, env_vars:dict, n_neighbors:int, n_pcs:int, dist_metric:str, seed:int, resolutions:Iterable) -> tuple(AnnData, dict):
+     logging.info("Identify neighbors, generate UMAP embeddings, calulate clustering resolutions")
+
      '''
      FROM SCANPY DOCS FOR: scanpy.pp.neighbors()
      If not specified, the neighbors data is stored in .uns['neighbors'], distances and connectivities are stored in .obsp['distances'] and 
@@ -650,9 +670,347 @@ def clustering_dim_red(anndata_obj:AnnData, env_vars:dict, n_neighbors:int, n_pc
      https://scanpy.readthedocs.io/en/stable/api/generated/scanpy.pp.neighbors.html#scanpy.pp.neighbors
      '''
      scanpy.pp.neighbors(anndata_obj, n_neighbors=n_neighbors, n_pcs = n_pcs, knn=True, method="umap", metric = dist_metric, random_state = seed)
+     
+     # calculate umap embeddings
+     # n_components is the number of dimisions to plot umap embedding into; 2 is typical, and 3 is if you want a 3D
+     # umap; this is not in reference to the number of PC compoenents to use, which is used to determine the neighborhood connectivity
+     # method: umap or rapids (rapids for GPU accelerated and umap for CPU/non-accelerated)
+     # min_dist defaults to 0.5
+     # If not specified, the embedding is stored as obsm['X_umap'] and the the parameters in uns['umap']. If specified, the embedding is stored 
+     # as obsm[key_added] and the the parameters in uns[key_added].
+     scanpy.tl.umap(anndata_obj, n_components = 2, random_state = seed, method = 'umap', min_dist = 0.5, key_added = "initial_umap")
+
+
+     '''
+     scanpy recommends using the leiden algorithm for clustering using scanpy.tl.leiden(). Clustering is based upon the previously calculated neighborhood graphs 
+     on the higher dimensional space.  If you prefer to use the louvain algorithm similar to what Seurat implements, you can use scanpy.tl.louvain().
+
+     The options I haev set for the Leiden algorithm for identifying cluster boundries are the following:
+
+     * key_added: if you don't set this, it defaults to leiden but since want to calulcate many resolutions are one time using the for loop, I make a key that stores all resolutions as leiden_res_ followed by the reolution to two decimal places.
+     *resolution: this is an float of the resolution you want to calculate; smaller resolutions results in broader and fewer clusters (more global), while larger resolutions result in more granular smaller clusters but more clusters (more localized/specific clusters)
+     *flavor: the default is igraph but this allows you to specify which implementation of the leiden package you want to use
+     *n_iterations: this is the number of iterations you want the algorithm to go through; I set it to -1 which is the default, which means go through as many iterations as it needs before it completes/converges. No limit.
+     *random_state: is essentially a seed since all of the clustering is unsupervised, so can be set to an integer for keeping results reproducible between runs
+     *use_weights: if True, edge weights from the graph are used in the computation (placing more emphasis on stronger edges).
+     *neighbors:_key by default this is to None, which means the neighbors calcaulated before are stored in the default location of .obsp["connectivities"]. This shouldn't be changed unless you have multiple neighbor graphs calculated or you changed the name of the key when running the neighbors command above.
+     '''     
+     # for loop through a few different resolutions to test a few options and then refine from here if needed
+     for res in resolutions:
+          print(res)
+          scanpy.tl.leiden(anndata_obj, key_added=f"leiden_res_{res:.2f}", resolution=res, flavor="igraph", n_iterations= -1, random_state = seed, use_weights = True, neighbors_key = None)
+     
+
+     #clustree resolution check
+     fig = pyclustree.clustree(anndata_obj, 
+          [f"leiden_res_{res:.2f}" for res in resolutions],
+          title="Clustree",
+          edge_weight_threshold=0.05,  # the minimum fraction of the parent cluster assigned to the child cluster to plot
+          show_fraction=True  # show the fraction of cells in each cluster
+          )
+     fig.set_size_inches(15, 15)
+     fig.set_dpi(100)
+     fig.savefig(pathlib.Path("cluster_analysis", f"clustree_overall_stability.png"),
+          dpi=300,
+          bbox_inches="tight"
+          )
+
+     # clusteree by gene expression
+     genes = ["CD3G", "CD3D", "CD8A", "CD4", "MS4A1", "CD79A", "NKG7", "LYZ"]
+
+     # Keep only genes that exist
+     genes = [g for g in genes if g in anndata_obj.var_names]
+     idx = [anndata_obj.var_names.get_loc(g) for g in genes]
+
+     # Small AnnData containing only the genes of interest
+     tmp = anndata_obj[:, genes].copy()
+
+     # Use the normalized layer as the expression matrix
+     tmp.X = anndata_obj.layers["normalized"][:, idx].copy()
+
+     # Set raw from this normalized matrix
+     tmp.raw = tmp.copy()
+
+     for gene in genes:
+          fig = pyclustree.clustree(tmp,
+               [f"leiden_res_{res:.2f}" for res in resolutions],
+               title=f"Clustree colored by {gene}",
+               edge_weight_threshold=0.05,
+               node_color_gene=gene,
+               node_colormap="Reds",
+               show_colorbar=True,
+               show_fraction=True  # show the fraction of cells in each cluster
+               )
+          fig.set_size_inches(15, 15)
+          fig.set_dpi(100)
+          fig.savefig(pathlib.Path("cluster_analysis", f"clustree_{gene}.png"),
+               dpi=300,
+               bbox_inches="tight"
+               )
+     
+
+     # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
+     # but there will be added PCA calculations and data to obsm, varm, and uns
+     anndata_obj.write(filename = os.path.join(env_vars["workingDir"], "h5ad_objects", "filtered_gene_symbol_{}_{}.h5ad".format(env_vars["save_prefix"], env_vars["date"])),
+                       convert_strings_to_categoricals = True,
+                       compression = "gzip")
+     
+     with open(pathlib.Path("".join(["workspace_files/vars_and_params_", env_vars["save_prefix"], "_", env_vars["date"], ".pkl"])), "wb") as f:
+          pickle.dump(env_vars, f)
 
      return anndata_obj, env_vars
 
+
+@profile
+def plot_reductions(anndata_obj:AnnData, env_vars:dict, reduction_name:str, layer:str, ncol_layout:int,  categorical_col:str, continuous_col:str, marker:str, groupby_col:str, file_savename:str) -> None:
+     '''
+     For plotting umap:
+     gene_symbols: str | None (default: None)
+     Column name in .var DataFrame that stores gene symbols. By default var_names refer to the index column of the .var DataFrame. Setting this option allows alternative 
+     names to be used.
+     '''
+
+     # color_map = continuous colors: magma, viridis
+     # palette = categorical colors: Set1, Set2, Set3, Accent, tab20, okabe_ito, Dark2
+     '''
+     Marker	Symbol
+     '.'	point (default, small)
+     'o'	circle
+     ','	pixel (tiny square, fastest to render)
+     's'	square
+     '^'	triangle up
+     'v'	triangle down
+     'D'	diamond
+     'd'	thin diamond
+     '+'	plus
+     'x'	x
+     '*'	star
+     '''
+
+     scanpy.pl.embedding(anndata_obj,  
+                         basis = reduction_name, 
+                         layer = layer, 
+                         color = groupby_col, 
+                         projection = '2d',
+                         ncols = ncol_layout,
+                         add_outline = False, 
+                         wspace=0.5, 
+                         colorbar_loc = "bottom", 
+                         color_map = continuous_col, 
+                         palette= categorical_col,
+                         hspace=0.5, 
+                         frameon=False, 
+                         marker = marker,
+                         show = False)
+
+     plt.savefig("cluster_analysis/{}.png".format(file_savename), dpi=300, bbox_inches="tight")
+     plt.savefig("cluster_analysis/{}.pdf".format(file_savename), bbox_inches="tight")
+     plt.close()    
+
+     '''
+     #clustree on top of a umap or any other dim reference
+     fig = clustree(
+     adata,
+     [f"leiden_{str(resolution).replace('.', '_')}" for resolution in [0.1, 1.0]],
+     title="UMAP Clustree of PBMC68k",
+     scatter_reference="X_umap",
+     node_size_range=(200, 300),
+     edge_width_range=(0.1, 2.0),
+     graph_plot_kwargs={"font_color": "black", "font_size": 10, "alpha": 0.75},
+     )
+     fig.set_size_inches(7.5, 5)
+     fig.set_dpi(100)
+     '''
+
+
+
+
+     '''
+     # code written by Claude and function for split.by since scanpy doesn't have a split.by option
+     import scanpy as sc
+     import matplotlib.pyplot as plt
+     import math
+
+     def umap_split_by(
+     adata,
+     basis,
+     color_col,          # single column to color by (categorical or continuous)
+     split_by,            # metadata column to split/facet by
+     layer=None,
+     palette="tab20",
+     marker=".",
+     size=None,
+     frameon=False,
+     ncols=5,
+     figsize_per_panel=(3.5, 3.5),
+     legend_loc="right margin",   # set to None if you don't want any legend
+     save=None,                    # e.g. "umap_leiden_split.png"
+     ):
+     # get split categories
+     categories = adata.obs[split_by].cat.categories if hasattr(adata.obs[split_by], "cat") \
+                    else sorted(adata.obs[split_by].unique())
+
+     n = len(categories)
+     nrows = math.ceil(n / ncols)
+
+     fig, axes = plt.subplots(
+          nrows, ncols,
+          figsize=(figsize_per_panel[0]*ncols, figsize_per_panel[1]*nrows),
+          squeeze=False,
+     )
+     axes = axes.flatten()
+
+     # shared axis limits across all panels, taken from the full embedding
+     coords = adata.obsm[f"X_{basis}"] if f"X_{basis}" in adata.obsm else adata.obsm[basis]
+     xlim = (coords[:, 0].min(), coords[:, 0].max())
+     ylim = (coords[:, 1].min(), coords[:, 1].max())
+
+     # lock in consistent category colors before subsetting, so cluster 0
+     # is the same color in every panel
+     if f"{color_col}_colors" not in adata.uns:
+          sc.pl.embedding(adata, basis=basis, color=color_col, show=False)
+          plt.close()
+
+     for i, cat in enumerate(categories):
+          ax = axes[i]
+          subset = adata[adata.obs[split_by] == cat]
+          sc.pl.embedding(
+               subset,
+               basis=basis,
+               layer=layer,
+               color=color_col,
+               palette=palette,
+               marker=marker,
+               size=size,
+               frameon=frameon,
+               ax=ax,
+               show=False,
+               title=str(cat),
+               legend_loc=legend_loc if i == n - 1 else None,  # legend only on last panel
+          )
+          ax.set_xlim(xlim)
+          ax.set_ylim(ylim)
+
+     # turn off any unused axes (when categories don't fill the grid evenly)
+     for j in range(n, len(axes)):
+          axes[j].axis("off")
+
+     fig.suptitle(color_col, fontsize=14, y=1.02)
+     plt.tight_layout()
+
+     if save:
+          fig.savefig(save, dpi=150, bbox_inches="tight")
+
+     return fig
+
+
+     # ---- usage ----
+     fig = umap_split_by(
+     anndata_obj,
+     basis="initial_umap",
+     color_col="leiden_res_0.60",
+     split_by="sample",
+     layer="normalized",
+     palette="tab20",
+     marker="*",
+     ncols=5,
+     )
+     plt.show()
+     '''
+
+
+@profile
+def one_vs_all_de(anndata_obj:AnnData, env_vars:dict, num_genes_to_plot:int, de_test:str, core_genes_to_plot:Iterable, min_pct:float, max_padj:float) -> tuple(AnnData, dict):
+     # obtain cluster-specific differentially expressed genes using Wilcoxon
+     pattern = re.compile(r"^leiden_res_[0-9]*")
+     all_resolutions = [x for x in anndata_obj.obs_keys() if pattern.search(x)]
+     
+     if de_test == "pyMAST":
+          for res in all_resolutions:
+               # obtrain cluster-specific differentially expressed genes using MAST
+               pymast.tl.rank_genes_groups(anndata_obj,
+                    groupby=res,          # obs column with group labels
+                    groups="all",              # test all grnum_genes_to_plotoups vs. rest
+                    reference="rest",
+                    layer="normalized",                # use adata.X (pass layer name for a specific layer)
+                    ebayes=True,               # empirical Bayes variance shrinkage
+                    method="bayesglm",         # "bayesglm" | "glm"
+                    n_jobs=-1,                 # parallelism (-1 = all cores)
+                    key_added='{}_rank_genes_groups'.format(res)
+                    #cdr_key = '{}_cdr'.format(res),
+                    #pts = True
+               )
+
+               # get df of the results of the MAST DE of 1 vs all for all clusters
+               # setting group=None means you want all clusters DE.  If you only want to see a specific
+               # cluster group, such as just cluster 0 results, you can set group = "0" or group = "1" to get 
+               # cluster ID 1 results for MAST    
+               de_df = scanpy.get.rank_genes_groups_df(anndata_obj, group=None, key='{}_rank_genes_groups'.format(res))
+               # keep only significant hits
+               de_df = de_df[de_df["pvals_adj"] < max_padj]
+               # to prevent rare clonotypes from being selected, also apply a minimum percent expressed per group
+               de_df = de_df[de_df["pct_nz_group"] > min_pct]
+
+               # top n genes by logfoldchanges within each cluster
+               topn_per_group = (de_df.groupby("group", sort=False, group_keys=False).apply(lambda x: x.nlargest(num_genes_to_plot, "logfoldchanges")))
+               genes_to_plot = topn_per_group["names"].tolist() + core_genes_to_plot
+
+               # plot mean expression
+               dp_mean_norm_expr = scanpy.pl.DotPlot(anndata_obj, 
+                                   groupby = res, 
+                                   var_names=genes_to_plot, 
+                                   layer="normalized", 
+                                   standard_scale=None, 
+                                   dendrogram=False)
+               dp_mean_norm_expr.legend(colorbar_title="Mean Gene Expression", size_title="Fraction Expressing (%)")
+               dp_mean_norm_expr.make_figure()
+               ax = dp_mean_norm_expr.ax_dict["mainplot_ax"]
+               ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
+               dp_mean_norm_expr.savefig("cluster_analysis/{}_mean_expr_dotplot.png".format(res), bbox_inches="tight")
+               
+               # plot z-scaled expression
+               dp_scaled_expr = scanpy.pl.DotPlot(anndata_obj, 
+                                   groupby = res, 
+                                   var_names=genes_to_plot, 
+                                   layer="normalized", 
+                                   standard_scale="var",
+                                   cmap = "RdBu_r",
+                                   vcenter = 0, 
+                                   var_group_rotation = 45,
+                                   dendrogram=False)
+               dp_scaled_expr.legend(colorbar_title="Z-scaled Expression", size_title="Fraction Expressing (%)")
+               dp_scaled_expr.make_figure()
+               ax = dp_scaled_expr.ax_dict["mainplot_ax"]
+               ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
+               dp_scaled_expr.savefig("cluster_analysis/{}_scaled_expr_dotplot.png".format(res), bbox_inches="tight")
+     
+     else:
+          for res in all_resolutions:
+               scanpy.tl.rank_genes_groups(anndata_obj, 
+                                        groupby=res, 
+                                        groups="all",              # test all grnum_genes_to_plotoups vs. rest
+                                        reference="rest",
+                                        layer="normalized", 
+                                        method = de_test,
+                                        pts = True,
+                                        key_added='{}_rank_genes_groups'.format(res),
+                                        cdr_key = '{}_cdr'.format(res)
+                                        )
+
+     env_vars["de_test"] = de_test
+     env_vars["min_pct_plot_filter"] = min_pct
+     env_vars["max_padj_plot_filter"] = max_padj
+
+     # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
+     # but there will be added PCA calculations and data to obsm, varm, and uns
+     anndata_obj.write(filename = os.path.join(env_vars["workingDir"], "h5ad_objects", "testing_save_filtered_gene_symbol_{}_{}.h5ad".format(env_vars["save_prefix"], env_vars["date"])),
+                       convert_strings_to_categoricals = True,
+                       compression = "gzip")
+     
+     with open(pathlib.Path("".join(["workspace_files/vars_and_params_", env_vars["save_prefix"], "_", env_vars["date"], ".pkl"])), "wb") as f:
+          pickle.dump(env_vars, f)
+
+     return anndata_obj, env_vars
 
 
 
@@ -674,7 +1032,6 @@ test1 = ensembl_to_symbol_scipy(anndata_obj = orig_anndata_obj, gene_symbol_col 
 print("pandas sparse", end = "", flush= True)
 test1 = ensembl_to_symbol_pdsparse(anndata_obj = orig_anndata_obj, gene_symbol_col = "gene_name", cell_barcode_col = "bc_wells")
 '''
-
 
 
 '''
@@ -715,7 +1072,8 @@ if __name__ == "__main__":
      filtering_parser.add_argument("--mito_regex", default = "MT-", type = str)
      filtering_parser.add_argument("--ribo_regex", default = ["RPL", "RPS"], nargs= "+", type = str)
      filtering_parser.add_argument("--dbl_rate", default = "0.076", type = float32, help = "Look up the doublet detection rate expecation for the technology you are using; for Parse in 2026, it was estimated to be <3% see ParseBioScience_What_is_the_expected_doublet_rate_Support_Suite.html in supplemental_files, so you can set this to 0.03; 10x doublet rate is ~7.6% for 10,000 cells captured/sequenced and it is depenent on the numberof cells captured, so refer to 10x-How-To-Technical-Seminar_Sample-Prep.pdf under supplemental_files to determine this value for 10x. BD Rhapsody, see BD-Rhapsody-HT-Single-Cell-Analysis-System-Instrument-User-Guide_page33.pdf page 33 in supplemental_files, but estimated about 1.7% for 10k or 3.7% for 20k cells.  The default is 10x at 10,000 cells of 7.6% = 0.076."
-   
+     filtering_parser.add_argument("--removeDoublets", action = "store_true, help = "When this flag is specified, doublets are removed during the cell filtering step of the pipeline.  If this flag is not set, doublets are calculated and marked but not removed/fitlered."
+
 
      ## normalization and transformation options
      normalization_group = newProj_parser.add_argument_group("Normalization/Transformation options")
@@ -729,14 +1087,24 @@ if __name__ == "__main__":
 
 
      ## clustering and dimensionality reduction options 
-     clustering_dimred_group = newProj_parser.add_argument_group("Clustering and dimensionality reduction options")
-     clustering_dimred_group.add_argument("--hvg_features", default = 2000, type = int)
-     clustering_dimred_group.add_argument("--pca_var_change", default = 0.05, type = float)
-     clustering_dimred_group.add_argument("--neighbors", default = 30, type = int)
-     clustering_dimred_group.add_argument("--resolutions", default=[0.2, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0], nargs = "+", type = float)
+     neighbors_umap_clust_group = newProj_parser.add_argument_group("Clustering and dimensionality reduction options")
+     neighbors_umap_clust_group.add_argument("--hvg_features", default = 2000, type = int)
+     neighbors_umap_clust_group.add_argument("--pca_var_change", default = 0.05, type = float)
+     neighbors_umap_clust_group.add_argument("--neighbors", default = 30, type = int)
+     neighbors_umap_clust_group.add_argument("--resolutions", default=[0.2, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0], nargs = "+", type = float)
+     neighbors_umap_clust_group.add_argument("--dist_metric", default = "euclidean")
+     neighbors_umap_clust_group.add_argument("--core_genes_to_plot", default = "euclidean")
+     neighbors_umap_clust_group.add_argument("--top_genes_per_cluster_to_plot", default = 5, type = int)
+
+     ## differential clustering one vs all options 
+     one_vs_all_de_group = newProj_parser.add_argument_group("Differential expression options")
+     one_vs_all_de_group.add_argument("--de_test", default = "pyMAST", choices = ["pyMAST", "wilcoxon", "logreg", "t-test", "t-test_overestim_var"])
+     one_vs_all_de_group.add_argument("--min_pct_plot_filter", default = "pyMAST", choices = ["pyMAST", "wilcoxon", "logreg", "t-test", "t-test_overestim_var"])
+     one_vs_all_de_group.add_argument("--max_padj_plot_filter", default = "pyMAST", choices = ["pyMAST", "wilcoxon", "logreg", "t-test", "t-test_overestim_var"])
 
 
-     newProj_parser.add_argument("--top_genes_per_cluster_to_plot", default = 5, type = int)
+
+
      newProj_parser.add_argument("--additional_genes_to_plot", default=["CD3E", "CD3D", "CD4", "CD8A", "CD8B", "CD19", "MS4A1", "CD79A", "CD79B"], nargs = "+", type = str)
   
      # --- Subcommand: resume ---
