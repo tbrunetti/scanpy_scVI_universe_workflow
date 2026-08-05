@@ -7,10 +7,12 @@ requires-python = ">=3.14"
 dependencies = [
     "diffxpy>=0.7.4",
     "jupyter>=1.1.1",
+    "marimo>=0.23.10",
     "memory-profiler>=0.61.0",
     "pandas>=3.0.3",
     "pyarrow>=23.0.1",
     "pyclustree>=0.4.1",
+    "pymast",
     "pyscdblfinder>=0.1.0",
     "scanpy>=1.12",
     "scvi-tools[cuda,optional,tutorials]>=0.20.3",
@@ -22,3 +24,6 @@ override-dependencies = [
     "anndata==0.12.16",
     "pandas>=3.0.3"
 ]
+
+[tool.uv.sources]
+pymast = { git = "https://github.com/tbrunetti/pyMAST.git" }
