@@ -79,8 +79,8 @@ def add_de_args(parser: argparse.ArgumentParser) -> None:
 
 def add_resume_args(parser: argparse.ArgumentParser) -> None:
     g = parser.add_argument_group("Resume")
-    g.add_argument("--env_vars_config", type=Path, required=True)
-    g.add_argument("--update_working_dir", type=Path, default=None)
+    g.add_argument("--config_file",type=Path,required=True, help="Path to a saved PipelineConfig file.")
+    g.add_argument("--update_working_dir", type=Path, default=None, help="New project location if the project has been moved.")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -116,8 +116,14 @@ def parse_args(argv: Sequence[str] | None = None) -> PipelineConfig:
         return PipelineConfig.from_namespace(ns)
 
     if ns.run_mode == "resume":
-        config = PipelineConfig.load(ns.env_vars_config)
+        config = PipelineConfig.load(ns.config_file)
 
-    if ns.update_working_dir is not None:
-        config = config.with_updates(update_working_dir=ns.update_working_dir)
+        if ns.update_working_dir is not None:
+            config = config.with_updates(
+                working_dir=ns.update_working_dir
+            )
+
         return config
+
+    # throw error if runmode is not recognized
+    raise ValueError(f"Unknown run mode: {ns.run_mode}")

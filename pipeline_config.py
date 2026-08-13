@@ -133,13 +133,6 @@ class PipelineConfig:
     Typed, immutable snapshot of the parameters that define a run.
     """
 
-    # The selected workflow branch, such as newProject or resume.
-    #
-    # Why keep this in the config?
-    # Because the chosen mode determines what the rest of the pipeline is
-    # allowed to do. A saved config should remember that decision.
-    run_mode: str
-
     # Root directory for the analysis project.
     #
     # Why this is the key filesystem input:
@@ -216,9 +209,6 @@ class PipelineConfig:
     max_padj_plot_filter: float
     '''
 
-    # Resume-related fields.
-    env_vars_config: Path | None
-    update_working_dir: Path | None
 
     # One timestamp attached to the run so saved artifacts stay consistent.
     run_date: str = field(default_factory=_today_stamp)
@@ -244,67 +234,65 @@ class PipelineConfig:
     # Tradeoff:
     # - Field names must stay synchronized with argparse destination names.
     #   If those names drift, this method needs to be updated.
-@classmethod
-def from_namespace(cls, ns: Namespace) -> Self:
-    """
-    Convert the fully parsed argparse Namespace into a PipelineConfig.
+    @classmethod
+    def from_namespace(cls, ns: Namespace) -> Self:
+        """
+        Convert the fully parsed argparse Namespace into a PipelineConfig.
 
-    argparse is responsible for applying defaults and converting CLI input
-    into the correct basic Python types. This method then verifies that the
-    Namespace contains every field required by PipelineConfig and performs
-    any additional normalization needed for the config object.
+        argparse is responsible for applying defaults and converting CLI input
+        into the correct basic Python types. This method then verifies that the
+        Namespace contains every field required by PipelineConfig and performs
+        any additional normalization needed for the config object.
 
-    Keeping this check here prevents a typo or rename in the CLI from silently
-    causing a parameter to disappear from the configuration.
-    """
+        Keeping this check here prevents a typo or rename in the CLI from silently
+        causing a parameter to disappear from the configuration.
+        """
 
-    raw = vars(ns)
+        raw = vars(ns)
 
-    # Get the fields that PipelineConfig requires.
-    config_fields = {field.name for field in fields(cls)}
+        # Get the fields that PipelineConfig requires.
+        config_fields = {field.name for field in fields(cls)}
 
-    # Fields that are intentionally added by PipelineConfig rather than
-    # argparse. These are created after parsing and therefore should not be
-    # required in the Namespace.
-    internally_created_fields = {"run_date"}
+        # Fields that are intentionally added by PipelineConfig rather than
+        # argparse. These are created after parsing and therefore should not be
+        # required in the Namespace.
+        internally_created_fields = {"run_date"}
 
-    required_fields = config_fields - internally_created_fields
+        required_fields = config_fields - internally_created_fields
 
-    # Check that every expected config field was supplied by argparse.
-    missing_fields = required_fields - raw.keys()
+        # Check that every expected config field was supplied by argparse.
+        missing_fields = required_fields - raw.keys()
 
-    if missing_fields:
-        raise ValueError(
-            "The argparse Namespace is missing required PipelineConfig fields: "
-            + ", ".join(sorted(missing_fields))
+        if missing_fields:
+            raise ValueError(
+                "The argparse Namespace is missing required PipelineConfig fields: "
+                + ", ".join(sorted(missing_fields))
+            )
+
+        # Copy the argparse values into the config.
+        data = {name: raw[name] for name in required_fields}
+
+        # Convert paths into normalized pathlib.Path objects.
+        for key in (
+            "working_dir",
+            "filtered_feature_bc_matrix"
+        ):
+            data[key] = _as_path(data[key])
+
+        # argparse returns lists for nargs="+". Convert them to tuples because
+        # PipelineConfig is frozen and should not contain mutable collections.
+        data["metadata"] = (
+            tuple(tuple(pair) for pair in data["metadata"])
+            if data["metadata"] is not None
+            else None
         )
 
-    # Copy the argparse values into the config.
-    data = {name: raw[name] for name in required_fields}
+        data["ribo_regex"] = tuple(data["ribo_regex"])
+        data["regress_vars"] = tuple(data["regress_vars"])
+        data["resolutions"] = tuple(data["resolutions"])
+        data["core_genes_to_plot"] = tuple(data["core_genes_to_plot"])
 
-    # Convert paths into normalized pathlib.Path objects.
-    for key in (
-        "working_dir",
-        "filtered_feature_bc_matrix",
-        "env_vars_config",
-        "update_working_dir",
-    ):
-        data[key] = _as_path(data[key])
-
-    # argparse returns lists for nargs="+". Convert them to tuples because
-    # PipelineConfig is frozen and should not contain mutable collections.
-    data["metadata"] = (
-        tuple(tuple(pair) for pair in data["metadata"])
-        if data["metadata"] is not None
-        else None
-    )
-
-    data["ribo_regex"] = tuple(data["ribo_regex"])
-    data["regress_vars"] = tuple(data["regress_vars"])
-    data["resolutions"] = tuple(data["resolutions"])
-    data["core_genes_to_plot"] = tuple(data["core_genes_to_plot"])
-
-    return cls(**data)
+        return cls(**data)
 
     
     # -----------------------------------------------------------------
@@ -354,7 +342,7 @@ def from_namespace(cls, ns: Namespace) -> Self:
     def with_updates(self, **changes: Any) -> Self:
         normalized = dict(changes)
 
-        for key in ("working_dir", "filtered_feature_bc_matrix", "env_vars_config", "update_working_dir"):
+        for key in ("working_dir", "filtered_feature_bc_matrix"):
             if key in normalized:
                 normalized[key] = _as_path(normalized[key])
 
@@ -376,13 +364,3 @@ def from_namespace(cls, ns: Namespace) -> Self:
     def as_namespace(self) -> SimpleNamespace:
         payload = {f.name: getattr(self, f.name) for f in fields(self)}
         return SimpleNamespace(**payload)
-
-    # The active working directory is either the original one or the
-    # updated one supplied during resume.
-    #
-    # Why this is a property:
-    # - It keeps the "current root" rule in one place.
-    # - PathConfig can rely on this without adding its own special cases.
-    @property
-    def working_dir_effective(self) -> Path:
-        return self.update_working_dir or self.working_dir

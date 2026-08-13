@@ -93,7 +93,7 @@ class PathConfig:
     @classmethod
     def from_config(cls, config: PipelineConfig) -> Self:
         return cls(
-            working_dir=config.working_dir_effective,
+            working_dir=config.working_dir,
             save_prefix=config.save_prefix,
             run_date=config.run_date,
         )
@@ -147,8 +147,8 @@ class PathConfig:
 
     # Standard filename for the saved config snapshot.
     @property
-    def vars_pickle(self) -> Path:
-        return self.workspace_dir / f"vars_and_params_{self.save_prefix}_{self.run_date}.pkl"
+    def pipeline_config_pickle(self) -> Path:
+        return (self.workspace_dir / f"pipeline_config_{self.save_prefix}_{self.run_date}.pkl")
 
     # Standard filename for the saved doublet-detection object.
     @property
@@ -169,18 +169,3 @@ class PathConfig:
     @property
     def filtered_h5ad(self) -> Path:
         return self.h5ad_dir / f"filtered_gene_symbol_{self.save_prefix}_{self.run_date}.h5ad"
-
-    # Return a copy rooted at a different working directory.
-    #
-    # Why this matters:
-    # If a project folder is moved to a different disk or location, the
-    # same relative structure can be re-created by changing only this root.
-    #
-    # Advantage:
-    # - Supports relocation and resume workflows.
-    #
-    # Disadvantage:
-    # - Because the object is frozen, a new instance is returned instead of
-    #   mutating the existing one.
-    def with_working_dir(self, working_dir: str | Path) -> Self:
-        return replace(self, working_dir=Path(working_dir).expanduser().resolve())
