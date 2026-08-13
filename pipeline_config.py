@@ -62,6 +62,8 @@ from typing import Any, Self
 # The pipeline often writes multiple outputs that should share the same
 # timestamp. Generating the date once avoids subtle inconsistencies where
 # one file is stamped differently from the others.
+# eading underscore means “this is intended for internal/private use.” 
+# Python does not actually prevent other code from calling it; it is mainly a naming convention.
 def _today_stamp() -> str:
     return date.today().strftime("%m%d%Y")
 
@@ -207,10 +209,12 @@ class PipelineConfig:
     top_genes_per_cluster_to_plot: int
     core_genes_to_plot: tuple[str, ...]
 
-    # Differential expression settings.
+    '''
+    # Differential expression settings.- SAVE FOR DIFFERENT PIPELINE
     de_test: str
     min_pct_plot_filter: float
     max_padj_plot_filter: float
+    '''
 
     # Resume-related fields.
     env_vars_config: Path | None
@@ -218,6 +222,8 @@ class PipelineConfig:
 
     # One timestamp attached to the run so saved artifacts stay consistent.
     run_date: str = field(default_factory=_today_stamp)
+
+    
 
     # -----------------------------------------------------------------
     # Construction
