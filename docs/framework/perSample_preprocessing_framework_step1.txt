@@ -1,0 +1,171 @@
+===============================================================================
+            PER-SAMPLE PREPROCESSING scRNA-seq PIPELINE ARCHITECTURE
+===============================================================================
+
+
+                            USER / COMMAND LINE
+                                   |
+                                   |
+                    +--------------+--------------+
+                    |                             |
+                    v                             v
+             +-------------+                +-------------+
+             | newProject  |                |   resume    |
+             +-------------+                +-------------+
+                    |                             |
+          analysis arguments              --config_file
+          --working_dir                   --update_working_dir
+          --sample_name                         |
+          --platform                            |
+          --min_unique_genes                    |
+          --neighbors                           |
+          --resolutions                         |
+          ...                                   |
+                    |                             |
+                    v                             v
+              +------------------------------------------------+
+              |                    cli.py                      |
+              |                                                |
+              |              argparse / parse_args()           |
+              +------------------------------------------------+
+                    |                             |
+                    |                             |
+                    v                             v
+       PipelineConfig.from_namespace()     PipelineConfig.load()
+                    |                             |
+                    |                             |
+                    |                       load saved .pkl
+                    |                             |
+                    |                             v
+                    |                    +------------------+
+                    |                    | PipelineConfig   |
+                    |                    | from prior run   |
+                    |                    +------------------+
+                    |                             |
+                    |                    project moved?
+                    |                             |
+                    |                      YES ---+--- NO
+                    |                       |           |
+                    |                       v           |
+                    |             config.with_updates( |
+                    |                working_dir=...)   |
+                    |                       |           |
+                    |                       +-----+-----+
+                    |                             |
+                    +--------------+--------------+
+                                   |
+                                   v
+===============================================================================
+                        CONFIGURATION LAYER
+===============================================================================
+
+                       +---------------------------+
+                       |      PipelineConfig       |
+                       |                           |
+                       |      "WHAT TO DO"         |
+                       +---------------------------+
+                       | working_dir               |
+                       | save_prefix               |
+                       | sample_name               |
+                       | platform                  |
+                       | metadata                  |
+                       | seed                      |
+                       | threads                   |
+                       |                           |
+                       | QC parameters             |
+                       | ------------------------- |
+                       | min_unique_genes          |
+                       | max_unique_genes          |
+                       | min_umi_counts            |
+                       | mito_contam               |
+                       | dbl_rate                  |
+                       | remove_doublets           |
+                       |                           |
+                       | normalization parameters  |
+                       | ------------------------- |
+                       | size_factor               |
+                       | n_hvgs                    |
+                       | regress_vars              |
+                       | hvg_ignore                |
+                       |                           |
+                       | clustering parameters     |
+                       | ------------------------- |
+                       | neighbors                 |
+                       | resolutions               |
+                       | dist_metric               |
+                       | ...                       |
+                       |                           |
+                       | run_date                  |
+                       +---------------------------+
+                                   |
+                     +-------------+-------------+
+                     |                           |
+                     |                           |
+                     v                           v
+
+         SAVE FOR RESUME                    BUILD PATHS
+                     |                           |
+                     |                           |
+             config.save(...)                     |
+                     |                           |
+                     v                           v
+        +-----------------------+       PathConfig.from_config(config)
+        | PipelineConfig .pkl  |                   |
+        |                       |                   v
+        | DURABLE / ON DISK    |       +---------------------------+
+        +-----------------------+       |        PathConfig         |
+                                        |                           |
+                                        |       "WHERE"             |
+                                        +---------------------------+
+                                        | working_dir               |
+                                        | save_prefix               |
+                                        | run_date                  |
+                                        +---------------------------+
+                                                   |
+                                                   |
+                                    derives filesystem locations
+                                                   |
+                   +-------------------------------+------------------+
+                   |               |               |                  |
+                   v               v               v                  v
+
+             h5ad_dir          qc_dir        workspace_dir       cluster_dir
+
+===============================================================================
+                          FILESYSTEM LAYER
+===============================================================================
+
+working_dir/
+|
++-- h5ad_objects/
+|   |
+|   +-- unfiltered_original_<prefix>_<date>.h5ad
+|   |
+|   +-- unfiltered_gene_symbol_<prefix>_<date>.h5ad
+|   |
+|   +-- filtered_gene_symbol_<prefix>_<date>.h5ad
+|
++-- qc_images/
+|   |
+|   +-- QC plots
+|   +-- doublet plots
+|   +-- filtering plots
+|
++-- workspace_files/
+|   |
+|   +-- vars_and_params_<prefix>_<date>.pkl
+|   |        ^
+|   |        |
+|   |        +---- THIS IS THE SAVED PipelineConfig
+|   |
+|   +-- unfiltered_scdblfinder_obj_<prefix>_<date>.pkl
+|
++-- cluster_analysis/
+    |
+    +-- 0.20/
+    |
+    +-- 0.40/
+    |
+    +-- 0.60/
+    |
+    +-- ...

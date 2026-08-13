@@ -1,0 +1,34 @@
+                           CLI
+                            |
+                 +----------+----------+
+                 |                     |
+             newProject              resume
+                 |                     |
+                 v                     v
+       PipelineConfig.from_      PipelineConfig.load()
+            namespace()                  |
+                 |                       |
+                 |                optional working_dir
+                 |                       |
+                 +-----------+-----------+
+                             |
+                             v
+                     PipelineConfig
+                       "WHAT"
+                             |
+              +--------------+---------------+
+              |                              |
+              | save()                       | from_config()
+              v                              v
+     pipeline_config.pkl                PathConfig
+                                        "WHERE"
+                                             |
+                            +----------------+----------------+
+                            |                |               |
+                            v                v               v
+                         h5ad_dir          qc_dir       workspace_dir
+                            |                |               |
+                            +----------------+---------------+
+                                             |
+                                             v
+                                       pipeline outputs

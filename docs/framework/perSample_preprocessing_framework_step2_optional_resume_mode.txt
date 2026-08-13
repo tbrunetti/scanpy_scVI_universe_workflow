@@ -1,0 +1,56 @@
+===============================================================================
+                              RESUME
+===============================================================================
+
+
+ OLD PROJECT
+
+ /old/location/project/
+         |
+         +-- workspace_files/
+              |
+              +-- vars_and_params_sample1_08132026.pkl
+                              |
+                              |
+                              v
+                    PipelineConfig.load()
+                              |
+                              v
+                     +----------------+
+                     | PipelineConfig |
+                     +----------------+
+                              |
+                              |
+              Did the project move?
+                              |
+                  +-----------+-----------+
+                  |                       |
+                 NO                      YES
+                  |                       |
+                  |                       v
+                  |             config.with_updates(
+                  |                 working_dir=
+                  |                 "/new/location"
+                  |             )
+                  |                       |
+                  +-----------+-----------+
+                              |
+                              v
+                  PathConfig.from_config(config)
+                              |
+                              v
+                     +----------------+
+                     |   PathConfig   |
+                     +----------------+
+                              |
+                              |
+                              v
+
+                   ALL PATHS REGENERATED
+
+                 /new/location/project/
+                        |
+             +----------+----------+
+             |          |          |
+             v          v          v
+         h5ad_dir     qc_dir    cluster_dir
