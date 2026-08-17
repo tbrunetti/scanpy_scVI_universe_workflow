@@ -145,6 +145,12 @@ class PathConfig:
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
         self.cluster_dir.mkdir(parents=True, exist_ok=True)
 
+    # defined path and file name for the metadata that is calculated on the project level
+    # metrics and saved as a pickle file and works like an unstructured dictionary
+    @property
+    def analysis_metadata_pickle(self) -> Path:
+        return (self.workspace_dir / f"analysis_metadata_{self.save_prefix}_{self.run_date}.pkl")
+
     # Standard filename for the saved config snapshot.
     @property
     def pipeline_config_pickle(self) -> Path:
@@ -163,9 +169,9 @@ class PathConfig:
     # Post-conversion but pre-filtering AnnData checkpoint file.
     @property
     def unfiltered_gene_symbol_h5ad(self) -> Path:
-        return self.h5ad_dir / f"unfiltered_gene_symbol_{self.save_prefix}_{self.run_date}.h5ad"
+        return self.h5ad_dir / f"unfiltered_geneSymbol_{self.save_prefix}_{self.run_date}.h5ad"
 
     # Post-filtering AnnData checkpoint file.
     @property
     def filtered_h5ad(self) -> Path:
-        return self.h5ad_dir / f"filtered_gene_symbol_{self.save_prefix}_{self.run_date}.h5ad"
+        return self.h5ad_dir / f"filtered_geneSymbol_{self.save_prefix}_{self.run_date}.h5ad"
