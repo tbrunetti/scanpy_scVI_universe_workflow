@@ -44,6 +44,7 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Self
+from gene_sets import CELL_CYCLE_GENE_SETS
 
 
 # ---------------------------------------------------------------------
@@ -185,8 +186,10 @@ class PipelineConfig:
     ribo_regex: tuple[str, ...]
     dbl_rate: float
     remove_doublets: bool
-
-    # Normalization / transformation controls.
+    s_genes: tuple[str, ...]
+    g2m_genes: tuple[str, ...]
+    
+    # Normalization / transformation controls .
     size_factor: int | None
     save_memory: bool
     data_chunk_size: int | None
@@ -291,6 +294,21 @@ class PipelineConfig:
         data["regress_vars"] = tuple(data["regress_vars"])
         data["resolutions"] = tuple(data["resolutions"])
         data["core_genes_to_plot"] = tuple(data["core_genes_to_plot"])
+        
+        # Select a model for the cell-cycle gene sets.
+        # If custom, pull the genes supplied through argparse.
+
+        if ns.cell_cycle_model in CELL_CYCLE_GENE_SETS:
+            gene_set = CELL_CYCLE_GENE_SETS[ns.cell_cycle_model]
+            data["s_genes"] = tuple(gene_set["s_genes"])
+            data["g2m_genes"] = tuple(gene_set["g2m_genes"])
+
+        elif ns.cell_cycle_model == "custom":
+            if ns.s_genes is None or ns.g2m_genes is None:
+                raise ValueError(
+                    "--s_genes and --g2m_genes are required "
+                    "when --cell_cycle_model custom"
+                )
 
         return cls(**data)
 
