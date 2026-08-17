@@ -42,10 +42,14 @@ def add_filtering_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument("--max_unique_genes", type=int, default=None, help = "Filter out any cells that have more than x number of unique genes expressed.  Default: None, this upper limit is not applied." )
     g.add_argument("--max_umi_counts", type=int, default=None, help = "Filter out any cells that have more than x number of UMIs/reads in the cell.  Default: None, this upper limit is not applied.")
     g.add_argument("--min_complexity", type=float, default=0.8)
-    g.add_argument("--mito_regex", type=str, default="MT-", help = "The regular expression string to use to extract mitochondrial genes.  The best way to test this is to try the regex on the feature/gene matrix to ensure only mitochondrial genes are being extracted.")
+    g.add_argument("--mito_regex", type=str, default=r"^MT-", help = "The regular expression string to use to extract mitochondrial genes.  The best way to test this is to try the regex on the feature/gene matrix to ensure only mitochondrial genes are being extracted. The r w/o quotes tells python to treat it as raw so that backslashes are not interpreted as literals when pairing with other regex.")
     g.add_argument("--ribo_regex", nargs="+", type=str, default=["RPL", "RPS"], help = "The regular expression string to use to extract ribosomal genes.  The best way to test this is to try the regex on the feature/gene matrix to ensure only mitochondrial genes are being extracted." )
     g.add_argument("--dbl_rate", type=float, default=0.076, help = "Look up the doublet detection rate expecation for the technology you are using; for Parse in 2026, it was estimated to be <3%% see ParseBioScience_What_is_the_expected_doublet_rate_Support_Suite.html in supplemental_files, so you can set this to 0.03; 10x doublet rate is ~7.6%% for 10,000 cells captured/sequenced and it is depenent on the numberof cells captured, so refer to 10x-How-To-Technical-Seminar_Sample-Prep.pdf under supplemental_files to determine this value for 10x. BD Rhapsody, see BD-Rhapsody-HT-Single-Cell-Analysis-System-Instrument-User-Guide_page33.pdf page 33 in supplemental_files, but estimated about 1.7%% for 10k or 3.7%% for 20k cells.  The default is 10x at 10,000 cells of 7.6%% = 0.076")
     g.add_argument("--removeDoublets", action="store_true", dest="remove_doublets", help = "When this flag is specified, doublets are removed during the cell filtering step of the pipeline.  If this flag is not set, doublets are calculated and marked but not removed/fitlered.")
+    g.add_argument("--cell_cycle_model", choices = ["human", "mouse", "custom"], default = "human", help = "Cell cycle gene set to use based on organism selected.  If custom is selected, you must specify your own s_and g2m genes.")
+    g.add_argument("--s_genes", nargs = "+", default = None, help = "Custom S-phase genes.  Required when --cell_cycle_model is set to custom.")
+    g.add_argument("--g2m_genes", nargs = "+", default = None, help = "Custom G2/M-phase genes.  Required when --cell_cycle_model is set to custom.")
+
 
 
 def add_normalization_args(parser: argparse.ArgumentParser) -> None:
