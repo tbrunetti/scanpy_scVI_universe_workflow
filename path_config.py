@@ -127,8 +127,8 @@ class PathConfig:
     # Why a method instead of a stored path?
     # Because this folder is parameterized by resolution and can be built
     # on demand from the same root directory.
-    def resolution_dir(self, resolution: float) -> Path:
-        return self.cluster_dir / f"{resolution:.2f}"
+    def resolution_dir(self, resolution: str) -> Path:
+        return self.cluster_dir / f"{resolution}"
 
     # Create the standard directory tree used by the pipeline.
     #
