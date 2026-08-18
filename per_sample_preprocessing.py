@@ -558,11 +558,12 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
     fig = pyclustree.clustree(anndata_obj, 
         [f"leiden_res_{res:.2f}" for res in resolutions],
         title="Clustree",
-        x_spacing = 4, # space between nodes along the x-axis; default is 2.5
+        x_spacing = 7, # space between nodes along the x-axis; default is 2.5
+        y_spacing = 2,
         edge_weight_threshold=0.05,  # the minimum fraction of the parent cluster assigned to the child cluster to plot
         show_fraction=True  # show the fraction of cells in each cluster
         )
-    fig.set_size_inches(14, 12)
+    fig.set_size_inches(15, 12)
     fig.set_dpi(100)
 
     # Increase text size
@@ -595,13 +596,14 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
             [f"leiden_res_{res:.2f}" for res in resolutions],
             title=f"Clustree colored by {gene}",
             edge_weight_threshold=0.05,
-            x_spacing=4,
+            x_spacing=7,
+            y_spacing=2,
             node_color_gene=gene,
             node_colormap="Reds",
             show_colorbar=True,
             show_fraction=True  # show the fraction of cells in each cluster
             )
-        fig.set_size_inches(14, 12)
+        fig.set_size_inches(15, 12)
         fig.set_dpi(100)
         
         # Increase text size
@@ -632,13 +634,14 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
         plot_reductions(anndata_obj = anndata_obj , 
                             reduction_name = "initial_umap", 
                             layer = "normalized", 
-                            ncol_layout = 4,  
+                            ncol_layout = 1,   # should always be 1 if clsuter label = True
                             continuous_col = "magma",  # for continuous values
                             categorical_col = "Set3", # for categorical values
                             marker = "o" ,
                             groupby_col = cluster_res,
+                            cluster_label = True, # labeling of clusters should be reserved for categorical variables only
                             file_savename = f"{cluster_res}_initial_umap",
-                            save_path = paths_config.resolution_dir)
+                            save_path = resolution_dir)
 
     # these plots are not at the per resolution level
     plot_reductions(anndata_obj = anndata_obj , 
@@ -649,20 +652,21 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
                         categorical_col = "Set3", # for categorical values
                         marker = "o" ,
                         groupby_col = ['n_counts', 'n_genes', 'pct_counts_is_mito', 'pct_counts_is_ribo'],
+                        cluster_label = False,
                         file_savename = "general_qc_check",
                         save_path = paths_config.cluster_dir)
 
     plot_reductions(anndata_obj = anndata_obj , 
                         reduction_name = "initial_umap", 
                         layer = "normalized", 
-                        ncol_layout = 3,  
+                        ncol_layout = 4, 
                         continuous_col = "magma",  # for continuous values
                         categorical_col = "Set3", # for categorical values
                         marker = "o",
-                        groupby_col = addl_genes, # args.core_genes_to_plot
-                        file_savename = "select_gene_expression",
+                        groupby_col = addl_genes, # core_genes_to_plot
+                        cluster_label = False, 
+                        file_savename = "core_genes_norm_expression_umap",
                         save_path = paths_config.cluster_dir)
-
 
     return anndata_obj
 
