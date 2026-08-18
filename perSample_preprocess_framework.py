@@ -102,7 +102,7 @@ def run_pipeline():
     #STEP5: idenfity high variably genes to use for clustering
     anndata_obj, analysis_metadata = identify_and_transform_hvgs(anndata_obj = anndata_obj,
                 n_hvgs = config.n_hvgs,
-                vars_to_regress = config.regress_vars,
+                vars_to_regress = list(config.regress_vars),
                 hvg_ignore = config.hvg_ignore,
                 threads = config.threads,
                 analysis_metadata = analysis_metadata,
@@ -117,12 +117,12 @@ def run_pipeline():
     
     #STEP7: find neighbors, generate umap, and define cluster partitions
     anndata_obj = neighbors_umap_clust(anndata_obj = anndata_obj,
-                non_neighbors = config.neighbors,
+                n_neighbors = config.neighbors,
                 n_pcs = analysis_metadata["pcs_to_use"],
                 dist_metric = config.dist_metric,
                 seed = config.seed,
                 resolutions = config.resolutions,
-                addl_clustree_plots = config.core_genes_to_plot,
+                addl_genes = config.core_genes_to_plot,
                 paths_config = paths)
 
 
