@@ -247,6 +247,338 @@ def plot_reductions(anndata_obj:AnnData, reduction_name:str, layer:str, ncol_lay
 
     plt.close(fig)
 
+
+@profile
+def plot_violin(anndata_obj: AnnData, layer: str, groupby_col: str, data_to_plot: str, file_savename: str, save_path: Path, xlabel: str = "", ylabel: str | None = None, order: Iterable | None = None, add_points: bool = False, size: int = 1, cut: float = 0, palette: str | list | dict = "husl") -> None:
+
+    # ------------------------------------------------------------------
+    # Validate inputs
+    # ------------------------------------------------------------------
+
+    if groupby_col not in anndata_obj.obs.columns:
+        raise KeyError(
+            f"Grouping column '{groupby_col}' not found in anndata_obj.obs."
+        )
+
+    if data_to_plot not in anndata_obj.var_names:
+        raise KeyError(
+            f"Variable '{data_to_plot}' not found in anndata_obj.var_names."
+        )
+
+    if layer not in anndata_obj.layers:
+        raise KeyError(
+            f"Layer '{layer}' not found in anndata_obj.layers."
+        )
+
+    # ------------------------------------------------------------------
+    # Determine category order
+    # ------------------------------------------------------------------
+
+    group_values = anndata_obj.obs[groupby_col]
+
+    if order is not None:
+        groups = list(order)
+
+    elif isinstance(group_values.dtype, pandas.CategoricalDtype):
+        groups = list(group_values.cat.categories)
+
+    else:
+        groups = list(group_values.dropna().unique())
+
+    # ------------------------------------------------------------------
+    # Extract values for the single variable
+    #
+    # Only one column is extracted from the layer. If the layer is
+    # sparse, only this single column is converted to a dense array;
+    # the entire AnnData layer is never densified.
+    # ------------------------------------------------------------------
+
+    values = anndata_obj[:, data_to_plot].layers[layer]
+
+    if scipy.sparse.issparse(values):
+        values = values.toarray().ravel()
+    else:
+        values = numpy.asarray(values).ravel()
+
+    # ------------------------------------------------------------------
+    # Create plotting DataFrame
+    # ------------------------------------------------------------------
+
+    df = pandas.DataFrame({
+        "group": group_values.to_numpy(),
+        "value": values,
+    })
+
+    # Remove observations with missing group or value information.
+    df = df.dropna(subset=["group", "value"])
+
+    # ------------------------------------------------------------------
+    # Calculate mean and median
+    # ------------------------------------------------------------------
+
+    stats = (
+        df.groupby("group", observed=False)["value"]
+        .agg(["mean", "median"])
+    )
+
+    # ------------------------------------------------------------------
+    # Create figure
+    # ------------------------------------------------------------------
+
+    fig, ax = plt.subplots()
+
+    # ------------------------------------------------------------------
+    # Plot violin
+    #
+    # `cut` controls how far the kernel density estimate (KDE) extends
+    # beyond the minimum and maximum observed values, expressed in
+    # units of the KDE bandwidth.
+    #
+    # cut=0:
+    #     The violin stops at the observed data range. This is a good
+    #     default for expression data because the violin does not imply
+    #     values outside the range actually observed.
+    #
+    # cut=1:
+    #     Allows the KDE to extend one bandwidth beyond the observed
+    #     range. This produces somewhat smoother violin tails.
+    #
+    # cut=2:
+    #     Allows extension by two bandwidths. This is the traditional
+    #     Seaborn behavior and gives smoother/more extended tails, but
+    #     the violin can visually extend beyond observed values.
+    #
+    # Intermediate values such as 0.5 are also valid.
+    #
+    # Importantly, `cut` changes only the displayed KDE/violin shape.
+    # It does NOT change the underlying values or the calculated mean
+    # and median.
+    # ------------------------------------------------------------------
+
+    # when palette = "husl" seaborn automatically picks the number of colors based on the number of cateories in your group
+    seaborn.violinplot(
+        data=df,
+        x="group",
+        y="value",
+        order=groups,
+        ax=ax,
+        inner=None,
+        cut=cut,
+        palette = palette
+    )
+
+    # ------------------------------------------------------------------
+    # Optionally add individual observations
+    # ------------------------------------------------------------------
+
+    if add_points:
+        seaborn.stripplot(
+            data=df,
+            x="group",
+            y="value",
+            order=groups,
+            ax=ax,
+            jitter=True,
+            size=size,
+            color="black",
+            zorder=2
+        )
+
+    # ------------------------------------------------------------------
+    # Add mean and median markers
+    #
+    # Seaborn's categorical x-axis positions correspond to
+    # 0, 1, 2, ... in the order supplied above.
+    # ------------------------------------------------------------------
+
+    for i, group in enumerate(groups):
+
+        if group not in stats.index:
+            continue
+
+        mean = stats.loc[group, "mean"]
+        median = stats.loc[group, "median"]
+
+        # Mean = horizontal crossbar
+        ax.plot(
+            i,
+            mean,
+            marker="_",
+            markersize=14,
+            markeredgewidth=2,
+            color="black",
+            zorder=10
+        )
+
+        # Median = diamond
+        ax.plot(
+            i,
+            median,
+            marker="D",
+            markersize=5,
+            markeredgewidth=1,
+            color="black",
+            zorder=10
+        )
+
+    # ------------------------------------------------------------------
+    # Labels
+    # ------------------------------------------------------------------
+
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(
+        ylabel if ylabel is not None else data_to_plot
+    )
+
+    plt.setp(
+        ax.get_xticklabels(),
+        rotation=45,
+        ha="right"
+    )
+
+    # ------------------------------------------------------------------
+    # Save
+    # ------------------------------------------------------------------
+
+    fig.savefig(
+        save_path / f"{file_savename}.png",
+        bbox_inches="tight",
+        dpi=300
+    )
+
+    fig.savefig(
+        save_path / f"{file_savename}.pdf",
+        bbox_inches="tight",
+        dpi=300
+    )
+
+    # ------------------------------------------------------------------
+    # Close figure
+    # ------------------------------------------------------------------
+
+    plt.close(fig)
+
+    '''
+    @profile
+    def plot_violin(anndata_obj: AnnData, layer: str, groupby_col: str, data_to_plot: str, file_savename: str, save_path: Path, xlabel: str = "", ylabel: str | None = None, order: Iterable | None = None, add_points: bool = False,size: int = 1) -> None: 
+
+    # Make sure the grouping column exists
+    if groupby_col not in anndata_obj.obs.columns:
+        raise KeyError(
+            f"Grouping column '{groupby_col}' not found in anndata_obj.obs."
+        )
+
+    # Make sure the requested variable exists
+    if data_to_plot not in anndata_obj.var_names:
+        raise KeyError(
+            f"Variable '{data_to_plot}' not found in anndata_obj.var_names."
+        )
+
+    # Make sure the requested layer exists
+    if layer not in anndata_obj.layers:
+        raise KeyError(
+            f"Layer '{layer}' not found in anndata_obj.layers."
+        )
+
+    # Make sure the output directory exists
+    save_path.mkdir(parents=True, exist_ok=True)
+
+    # Plot the violins
+    ax = scanpy.pl.violin(
+        anndata_obj,
+        keys=data_to_plot,
+        groupby=groupby_col,
+        rotation=45,
+        layer=layer,
+        order=order,
+        xlabel=xlabel,
+        ylabel=ylabel,
+        stripplot=add_points,
+        jitter=True,
+        size=size,
+        show=False,
+    )
+
+    # Get the values being plotted
+    values = anndata_obj[:, data_to_plot].layers[layer]
+
+    # Convert sparse/dense matrix to a 1D NumPy array
+    if hasattr(values, "toarray"):
+        values = values.toarray().ravel()
+    else:
+        values = numpy.asarray(values).ravel()
+
+    # Create a DataFrame containing the values and their group
+    df = pandas.DataFrame({
+        "group": anndata_obj.obs[groupby_col].values,
+        "value": values,
+    })
+
+    # Calculate mean and median for each group
+    stats = df.groupby("group", observed=False)["value"].agg(
+        ["mean", "median"]
+    )
+
+    # Determine the same group order used by the violin plot
+    if order is not None:
+        groups = list(order)
+    else:
+        group_values = anndata_obj.obs[groupby_col]
+
+        if pandas.api.types.is_categorical_dtype(group_values):
+            groups = list(group_values.cat.categories)
+        else:
+            groups = list(group_values.dropna().unique())
+
+    # Add mean and median markers
+    for i, group in enumerate(groups):
+
+        # Skip groups with no observations
+        if group not in stats.index:
+            continue
+
+        mean = stats.loc[group, "mean"]
+        median = stats.loc[group, "median"]
+
+        # Mean = horizontal crossbar
+        ax.plot(
+            i,
+            mean,
+            marker="_",
+            markersize=14,
+            markeredgewidth=2,
+            color="black",
+            zorder=10,
+        )
+
+        # Median = diamond
+        ax.plot(
+            i,
+            median,
+            marker="D",
+            markersize=5,
+            markeredgewidth=1,
+            color="black",
+            zorder=10,
+        )
+
+    # Save the figure
+    ax.figure.savefig(
+        save_path / f"{file_savename}.png",
+        bbox_inches="tight",
+        dpi=300,
+    )
+
+    ax.figure.savefig(
+        save_path / f"{file_savename}.pdf",
+        bbox_inches="tight",
+        dpi=300,
+    )
+
+    # Close the figure to avoid accumulating open figures
+    plt.close(ax.figure)
+    '''
+
     '''
      #clustree on top of a umap or any other dim reference
      fig = clustree(
