@@ -1,4 +1,3 @@
-from ast import Del
 from path_config import PathConfig
 from zipfile import Path
 from typing import Iterable
@@ -26,7 +25,7 @@ import pymast
 import re
 from pipeline_config import PipelineConfig
 import gc
-from visualization import plot_reductions
+from visualization import plot_reductions, plot_violin
 
 
 logger = logging.getLogger(__name__)
@@ -642,6 +641,16 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
                             cluster_label = True, # labeling of clusters should be reserved for categorical variables only
                             file_savename = f"{cluster_res}_initial_umap",
                             save_path = resolution_dir)
+        
+        # plot the normalized expression of the core genes on a violin plot
+        for genes in addl_genes:
+            plot_violin(anndata_obj = anndata_obj,
+                        layer = "normalized",
+                        groupby_col = cluster_res,
+                        data_to_plot=genes,
+                        file_savename=f"{genes}_normalized_expression_violin_plot",
+                        save_path = resolution_dir
+                        )
 
     # these plots are not at the per resolution level
     plot_reductions(anndata_obj = anndata_obj , 
