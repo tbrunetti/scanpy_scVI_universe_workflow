@@ -1,3 +1,4 @@
+from marshmallow.validate import NoneOf
 from typing import Iterable
 import sys
 import os
@@ -19,6 +20,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 from adjustText import adjust_text
 from pathlib import Path
+from matplotlib.lines import Line2D
+
 
 @profile
 def qc_figures(anndata_obj:AnnData, status:str, paths_config:PathConfig, min_counts:int | None = None, min_genes:int | None = None, max_counts:int | None = None, max_genes:int | None = None, max_mito:float| None = None) -> None:
@@ -457,6 +460,424 @@ def plot_violin(anndata_obj: AnnData, layer: str, groupby_col: str, data_to_plot
     # ------------------------------------------------------------------
 
     plt.close(fig)
+
+
+@profile
+def pretty_pca_loadings(anndata_obj: AnnData, total_pcs_to_summarize: int, n_genes_to_plot_per_direction: int, paths_config: PathConfig) -> None:
+
+    loadings = anndata_obj.varm["PCs"]
+    gene_names = numpy.asarray(anndata_obj.var_names)
+
+    # -------------------------------------------------------------
+    # Use the same symmetric x-axis for every PC
+    # -------------------------------------------------------------
+    max_abs_loading = numpy.max(numpy.abs(loadings[:, :total_pcs_to_summarize]))
+
+    x_limit = max_abs_loading * 1.1
+
+    # -------------------------------------------------------------
+    # Determine subplot layout
+    # -------------------------------------------------------------
+    n_cols = 2
+    n_rows = int(numpy.ceil(total_pcs_to_summarize / n_cols))
+
+    # Larger figure = substantially more readable text
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, 4 * n_rows), constrained_layout=True,)
+
+    axes = numpy.atleast_1d(axes).flatten()
+
+    # -------------------------------------------------------------
+    # Plot each PC
+    # -------------------------------------------------------------
+    for pc in range(total_pcs_to_summarize):
+
+        ax = axes[pc]
+        pc_loadings = loadings[:, pc]
+
+        # ---------------------------------------------------------
+        # Select strongest negative and positive loadings
+        # ---------------------------------------------------------
+        negative_idx = numpy.argsort(pc_loadings)[:n_genes_to_plot_per_direction]
+
+        positive_idx = numpy.argsort(pc_loadings)[-n_genes_to_plot_per_direction:]
+
+        idx = numpy.concatenate([negative_idx, positive_idx])
+
+        values = pc_loadings[idx]
+        genes = gene_names[idx]
+
+        # Sort from most negative to most positive
+        order = numpy.argsort(values)
+
+        values = values[order]
+        genes = genes[order]
+
+        # ---------------------------------------------------------
+        # Colors
+        # ---------------------------------------------------------
+        colors = ["#4C78A8" if value < 0 else "#E07A5F" for value in values]
+
+        # ---------------------------------------------------------
+        # Plot
+        # ---------------------------------------------------------
+        ax.barh(genes, values, color=colors, height=0.72, alpha=0.9)
+
+        # Zero reference line
+        ax.axvline(0, color="#555555", linewidth=1.3)
+
+        # Same x-axis scale for every PC
+        ax.set_xlim(-x_limit, x_limit)
+
+        # ---------------------------------------------------------
+        # PC title
+        # ---------------------------------------------------------
+        ax.set_title(f"PC{pc + 1}", fontsize=17, fontweight="bold",pad=10)
+
+        # ---------------------------------------------------------
+        # X-axis
+        # ---------------------------------------------------------
+        ax.set_xlabel("Gene Loadings", fontsize=13, fontweight="bold", labelpad=7)
+
+        # ---------------------------------------------------------
+        # Tick labels
+        # ---------------------------------------------------------
+        ax.tick_params(axis="x", labelsize=11)
+
+        ax.tick_params(axis="y", labelsize=12, pad=5)
+
+        # Make gene names slightly heavier
+        for label in ax.get_yticklabels():
+            label.set_fontweight("medium")
+
+        # ---------------------------------------------------------
+        # Grid
+        # ---------------------------------------------------------
+        ax.grid(axis="x", linestyle="--", linewidth=0.7, alpha=0.2)
+
+        ax.set_axisbelow(True)
+
+        # ---------------------------------------------------------
+        # Remove unnecessary borders
+        # ---------------------------------------------------------
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_visible(False)
+
+    # -------------------------------------------------------------
+    # Hide unused subplot(s)
+    # -------------------------------------------------------------
+    for ax in axes[total_pcs_to_summarize:]:
+        ax.set_visible(False)
+
+    # -------------------------------------------------------------
+    # Overall title
+    # -------------------------------------------------------------
+    fig.suptitle(
+        "Top Positive and Negative Gene Loadings by Principal Component",
+        fontsize=22,
+        fontweight="bold",
+    )
+
+    # -------------------------------------------------------------
+    # Save
+    # -------------------------------------------------------------
+    fig.savefig(
+        paths_config.qc_dir / "pretty_pca_loadings.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+    plt.close(fig)
+
+
+
+@profile
+def pretty_highly_variable_genes(anndata_obj: AnnData, genes_to_ignore_for_clustering: Iterable, paths_config: PathConfig, n_top_genes: int = 10) -> None:
+
+    """
+    Plot highly variable genes, highlighting:
+
+        - selected HVGs
+        - ignored genes
+        - all other genes
+
+    The top `n_top_genes` selected HVGs (i.e. HVGs not in
+    `genes_to_ignore_for_clustering`) are labeled. Labels are
+    automatically repositioned to minimize overlap.
+
+    Parameters
+    ----------
+    anndata_obj : AnnData
+        AnnData object containing the HVG results.
+
+    genes_to_ignore_for_clustering : Iterable
+        Gene names that should be excluded from clustering,
+        even if they are classified as highly variable.
+
+    paths_config : PathConfig
+        Configuration object containing the QC output directory.
+
+    n_top_genes : int, default=10
+        Number of selected HVGs to label.
+
+    Returns
+    -------
+    None
+    """
+
+    # ---------------------------------------------------------
+    # Define gene sets
+    # ---------------------------------------------------------
+    ignored_genes = set(genes_to_ignore_for_clustering)
+
+    gene_names = numpy.asarray(anndata_obj.var_names)
+
+    if "highly_variable" not in anndata_obj.var.columns:
+        raise ValueError(
+            "anndata_obj.var does not contain 'highly_variable'. "
+            "Run scanpy.pp.highly_variable_genes() first."
+        )
+
+    is_hvg = anndata_obj.var["highly_variable"].to_numpy()
+
+    is_ignored = numpy.array([gene in ignored_genes for gene in gene_names])
+
+    # HVGs that are actually selected for clustering
+    is_selected_hvg = is_hvg & ~is_ignored
+
+    # ---------------------------------------------------------
+    # Automatically determine the HVG ranking metric
+    # ---------------------------------------------------------
+    if "dispersions_norm" in anndata_obj.var.columns:
+        y_column = "dispersions_norm"
+        y_label = "Normalized dispersion"
+
+    elif "variances_norm" in anndata_obj.var.columns:
+        y_column = "variances_norm"
+        y_label = "Normalized variance"
+
+    else:
+        raise ValueError(
+            "No recognized HVG ranking metric found in "
+            "anndata_obj.var. Expected either "
+            "'dispersions_norm' or 'variances_norm'."
+        )
+
+    # ---------------------------------------------------------
+    # Check that mean expression is available
+    # ---------------------------------------------------------
+    if "means" not in anndata_obj.var.columns:
+        raise ValueError(
+            "anndata_obj.var does not contain 'means'. "
+            "Run scanpy.pp.highly_variable_genes() first."
+        )
+
+    x = anndata_obj.var["means"].to_numpy()
+    y = anndata_obj.var[y_column].to_numpy()
+
+    # ---------------------------------------------------------
+    # Identify top selected HVGs
+    # ---------------------------------------------------------
+    candidate_idx = numpy.where(is_selected_hvg)[0]
+
+    if len(candidate_idx) == 0:
+        raise ValueError(
+            "No highly variable genes remain after applying "
+            "genes_to_ignore_for_clustering."
+        )
+
+    n_top_genes = min(n_top_genes, len(candidate_idx))
+
+    top_idx = candidate_idx[numpy.argsort(y[candidate_idx])[-n_top_genes:]]
+
+    # Highest ranking genes first
+    top_idx = top_idx[numpy.argsort(y[top_idx])[::-1]]
+
+    # ---------------------------------------------------------
+    # Create figure
+    # ---------------------------------------------------------
+    fig, ax = plt.subplots(figsize=(10, 7),)
+
+    # ---------------------------------------------------------
+    # Plot all other genes
+    # ---------------------------------------------------------
+    other_genes = ~is_ignored & ~is_selected_hvg
+
+    ax.scatter(
+        x[other_genes],
+        y[other_genes],
+        s=18,
+        color="#D9D9D9",
+        marker="o",
+        alpha=0.55,
+        edgecolors="none",
+        rasterized=True,
+        label="Other gene",
+        zorder=1,
+    )
+
+    # ---------------------------------------------------------
+    # Plot selected HVGs
+    # ---------------------------------------------------------
+    ax.scatter(
+        x[is_selected_hvg],
+        y[is_selected_hvg],
+        s=26,
+        color="#4C78A8",
+        marker="o",
+        alpha=0.9,
+        edgecolors="none",
+        rasterized=True,
+        label="Selected HVG",
+        zorder=2,
+    )
+
+    # ---------------------------------------------------------
+    # Plot ignored genes
+    #
+    # These are plotted last so they remain visible even when
+    # they overlap another category.
+    # ---------------------------------------------------------
+    ax.scatter(
+        x[is_ignored],
+        y[is_ignored],
+        s=42,
+        color="#E45756",
+        marker="X",
+        alpha=0.95,
+        edgecolors="white",
+        linewidths=0.5,
+        rasterized=True,
+        label="Ignored gene",
+        zorder=3,
+    )
+
+    # ---------------------------------------------------------
+    # Highlight the top genes that will be labeled
+    # ---------------------------------------------------------
+    ax.scatter(
+        x[top_idx],
+        y[top_idx],
+        s=42,
+        color="#4C78A8",
+        marker="o",
+        edgecolors="white",
+        linewidths=0.7,
+        alpha=1.0,
+        zorder=4,
+    )
+
+    # ---------------------------------------------------------
+    # Add gene labels
+    # ---------------------------------------------------------
+    texts = []
+
+    for idx in top_idx:
+
+        texts.append(
+            ax.text(
+                x[idx],
+                y[idx],
+                gene_names[idx],
+                fontsize=8,
+                fontweight="bold",
+                color="#2F2F2F",
+                zorder=5,
+            )
+        )
+
+    # ---------------------------------------------------------
+    # Automatically prevent label overlap
+    # ---------------------------------------------------------
+    adjust_text(
+        texts,
+        ax=ax,
+        expand_points=(1.4, 1.4),
+        expand_text=(1.2, 1.4),
+        force_text=(0.5, 0.8),
+        force_points=(0.3, 0.5),
+        arrowprops=dict(
+            arrowstyle="-",
+            color="#777777",
+            lw=0.6,
+            alpha=0.7,
+        ),
+    )
+
+    # ---------------------------------------------------------
+    # Plot styling
+    # ---------------------------------------------------------
+    ax.set_title(
+        "Highly Variable Genes",
+        fontsize=15,
+        fontweight="bold",
+        pad=10,
+    )
+
+    ax.set_xlabel(
+        "Mean expression",
+        fontsize=11,
+        fontweight="bold",
+    )
+
+    ax.set_ylabel(
+        y_label,
+        fontsize=11,
+        fontweight="bold",
+    )
+
+    ax.tick_params(
+        axis="both",
+        labelsize=9,
+    )
+
+    ax.grid(
+        linestyle="--",
+        linewidth=0.6,
+        alpha=0.2,
+    )
+
+    ax.set_axisbelow(True)
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+
+    # ---------------------------------------------------------
+    # Legend
+    # ---------------------------------------------------------
+    handles, labels = ax.get_legend_handles_labels()
+
+    legend_order = [
+        labels.index("Selected HVG"),
+        labels.index("Ignored gene"),
+        labels.index("Other gene"),
+    ]
+
+    ax.legend(
+        [handles[i] for i in legend_order],
+        [labels[i] for i in legend_order],
+        loc="upper right",
+        frameon=False,
+        fontsize=9,
+    )
+
+    # ---------------------------------------------------------
+    # Final layout
+    # ---------------------------------------------------------
+    plt.tight_layout()
+
+    fig.savefig(
+        paths_config.qc_dir / "hvg.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+    plt.close(fig)
+
+
+
+
 
     '''
     @profile

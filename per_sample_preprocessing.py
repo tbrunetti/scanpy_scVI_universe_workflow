@@ -1,3 +1,4 @@
+from triton.language import cat
 from path_config import PathConfig
 from zipfile import Path
 from typing import Iterable
@@ -25,7 +26,7 @@ import pymast
 import re
 from pipeline_config import PipelineConfig
 import gc
-from visualization import plot_reductions, plot_violin
+from visualization import plot_reductions, plot_violin, pretty_pca_loadings, pretty_highly_variable_genes
 
 
 logger = logging.getLogger(__name__)
@@ -392,9 +393,16 @@ def normalize_and_transform(anndata_obj:AnnData, paths_config = PathConfig, size
     return anndata_obj
      
 @profile
-def calculate_cell_cycle(anndata_obj:AnnData, s_genes:Iterable[str], g2m_genes:Iterable[str]) -> AnnData:
+def calculate_cell_cycle(anndata_obj:AnnData, s_genes:Iterable[str], g2m_genes:Iterable[str], analysis_metadata:dict, paths_config:PathConfig) -> AnnData:
     scanpy.tl.score_genes_cell_cycle(anndata_obj, s_genes=s_genes, g2m_genes=g2m_genes)
-    return anndata_obj
+    analysis_metadata["total_S_phase_cells"] = int((anndata_obj.obs["phase"] == "S").sum())
+    analysis_metadata["total_G1_phase_cells"] = int((anndata_obj.obs["phase"] == "G1").sum())
+    analysis_metadata["total_G2M_phase_cells"] = int((anndata_obj.obs["phase"] == "G2M").sum())
+    
+    # save metrics generated from function as pickled file
+    with open(paths_config.analysis_metadata_pickle, "wb") as f:
+        pickle.dump(analysis_metadata, f)
+    return anndata_obj, analysis_metadata
 
 
 @profile     
@@ -428,12 +436,11 @@ def identify_and_transform_hvgs(anndata_obj:AnnData, analysis_metadata:dict, pat
 
 
     # plot HVGs and save in qc_images subdirectory
-    scanpy.pl.highly_variable_genes(anndata_obj, log = False, highly_variable_genes=True, show = False)
+    pretty_highly_variable_genes(anndata_obj = anndata_obj, 
+            genes_to_ignore_for_clustering = genes_to_ignore_for_clustering,
+            paths_config = paths_config,
+            n_top_genes = 10)
 
-    # since paths_config.qc_dir is a path type already, a / following it works similar to a path join without having to do os.path.join()
-    # .gcf() is a matplotlib fucntion (get current figure) and plt is the default out value of a plot
-    plt.gcf().savefig(paths_config.qc_dir / "hvg.png", bbox_inches="tight") # the figure part is what scanpy.pl outputs which is why I have it here
-    plt.close()
 
     # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
     #anndata_obj.layers["regressed_scaled"] = anndata_obj.X.toarray()
@@ -464,15 +471,6 @@ def pca(anndata_obj:AnnData, analysis_metadata:dict, pca_var_change:float, seed:
     https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.pca.html#scanpy.pp.pca
     '''
     scanpy.pp.pca(anndata_obj, n_comps = 50, zero_center = True, svd_solver = 'auto',  mask_var="highly_variable", random_state = seed, chunked = False, layer = None) # layer=None means to use the values in the active layer (.X) for the PCA
-    # plot elbow plot/
-    scanpy.pl.pca_variance_ratio(anndata_obj, n_pcs=50, log=True, show = False)
-    plt.gcf().savefig(paths_config.qc_dir / "pca_elbow_plot_of_hvgs.png", bbox_inches = "tight")
-    plt.close()
-    # plot pc loadings - top hvgs driving each PC
-    
-    scanpy.pl.pca_loadings(anndata_obj, components = '1,2,3,4,5,6,7,8,9,10', include_lowest = True, show = False) # include_lowest means to show the features that have the highest and lowest loadings
-    plt.gcf().savefig(paths_config.qc_dir / "pca_gene_loadings_of_hvgs.png", bbox_inches = "tight")
-    plt.close()
 
     #################################################################
     ##### store number of PCs to use for clustering in env_vars #####
@@ -497,6 +495,29 @@ def pca(anndata_obj:AnnData, analysis_metadata:dict, pca_var_change:float, seed:
     else:
         analysis_metadata["pcs_to_use"] = len(change_in_var)+1 #if there are no PCs that meet the criteria, use all PCs calculated
         logging.info("Total PCs to use: {}".format(analysis_metadata["pcs_to_use"]))
+
+    # plot elbow plot/
+    ax = scanpy.pl.pca_variance_ratio(anndata_obj, n_pcs=50, log=True, show = False)
+    fig = plt.gcf()
+    ax = fig.axes[0]
+    # Vertical dashed line
+    ax.axvline(x=analysis_metadata["pcs_to_use"], linestyle="--", color="red")
+
+    # Vertical text along the line, near the top
+    ax.text(analysis_metadata["pcs_to_use"], 0.97, f"PC={analysis_metadata["pcs_to_use"]}", rotation=90, va="top", ha="right", transform=ax.get_xaxis_transform())
+    plt.gcf().savefig(paths_config.qc_dir / "pca_elbow_plot_of_hvgs.png", bbox_inches = "tight")
+    plt.close()
+    
+    # plot pc loadings - top hvgs driving each PC
+    scanpy.pl.pca_loadings(anndata_obj, components = '1,2,3,4,5,6,7,8,9,10', include_lowest = True, show = False) # include_lowest means to show the features that have the highest and lowest loadings
+    plt.gcf().savefig(paths_config.qc_dir / "pca_gene_loadings_of_hvgs.png", bbox_inches = "tight")
+    plt.close()
+
+    pretty_pca_loadings(anndata_obj = anndata_obj, 
+            total_pcs_to_summarize = 10, 
+            n_genes_to_plot_per_direction = 5,
+            paths_config = paths_config)
+
 
      # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
      # but there will be added PCA calculations and data to obsm, varm, and uns
@@ -656,19 +677,7 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
     plot_reductions(anndata_obj = anndata_obj , 
                         reduction_name = "initial_umap", 
                         layer = "normalized", 
-                        ncol_layout = 4,  
-                        continuous_col = "magma",  # for continuous values
-                        categorical_col = "Set3", # for categorical values
-                        marker = "o" ,
-                        groupby_col = ['n_counts', 'n_genes', 'pct_counts_is_mito', 'pct_counts_is_ribo'],
-                        cluster_label = False,
-                        file_savename = "general_qc_check",
-                        save_path = paths_config.cluster_dir)
-
-    plot_reductions(anndata_obj = anndata_obj , 
-                        reduction_name = "initial_umap", 
-                        layer = "normalized", 
-                        ncol_layout = 4, 
+                        ncol_layout = 3, 
                         continuous_col = "magma",  # for continuous values
                         categorical_col = "Set3", # for categorical values
                         marker = "o",
@@ -679,6 +688,35 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
 
     return anndata_obj
 
+@profile
+def final_qc_images(anndata_obj:AnnData, reduction:str, layer:str, paths_config:PathConfig, continuous_color_pal:str="magma", categorical_color_pal:str="Set3") -> None:
+    logging.info("Generating final images for plotting QC metadata and cell cycle phase on different embeddings")
+
+    # final set of QC checks on umap embeddings and pca  
+    plot_reductions(anndata_obj = anndata_obj, 
+                reduction_name = reduction, 
+                layer = layer, 
+                ncol_layout = 2,  
+                continuous_col = continuous_color_pal,  # for continuous values: magma
+                categorical_col = categorical_color_pal,
+                marker = "o",
+                groupby_col = ['n_counts', 'n_genes', 'pct_counts_is_mito', 'pct_counts_is_ribo'],
+                cluster_label = False,
+                file_savename = f"final_qc_{reduction}",
+                save_path = paths_config.qc_dir)
+    
+    plot_reductions(anndata_obj = anndata_obj, 
+                reduction_name = reduction, 
+                layer = layer, 
+                ncol_layout = 1,  
+                continuous_col = continuous_color_pal,
+                categorical_col = categorical_color_pal,
+                marker = "o",
+                groupby_col = "phase",
+                cluster_label = True,
+                file_savename = f"phase_{reduction}",
+                save_path = paths_config.qc_dir)
+    
 
 
 '''
