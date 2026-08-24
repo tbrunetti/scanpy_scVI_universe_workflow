@@ -1,4 +1,3 @@
-from networkx import non_neighbors
 from initial_scRNAseq_analysis_per_sample import neighbors_umap_clust
 import path_config
 import anndata
@@ -6,6 +5,7 @@ from cli import parse_args
 from path_config import PathConfig
 from per_sample_preprocessing import generate_h5ad, add_qcmetrics_and_metadata, cell_filtering, normalize_and_transform, calculate_cell_cycle, identify_and_transform_hvgs, pca, neighbors_umap_clust
 from visualization import qc_figures, plot_reductions
+from pipeline_reporting import generate_quarto_report
 
 def run_pipeline():
     # --------------------------------------------------
@@ -124,6 +124,12 @@ def run_pipeline():
                 resolutions = config.resolutions,
                 addl_genes = config.core_genes_to_plot,
                 paths_config = paths)
+    
+    # --------------------------------------------------
+    # FINAL: generate HTML pipeline report
+    # --------------------------------------------------
+    generate_quarto_report(paths=paths, config=config)
+
 
 
 # initiate pipeline
