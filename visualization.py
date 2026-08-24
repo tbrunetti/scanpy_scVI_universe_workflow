@@ -35,7 +35,7 @@ def qc_figures(anndata_obj:AnnData, status:str, paths_config:PathConfig, min_cou
                     kde=True,
                     alpha=0.2,
                     log_scale=True).set_title(f"Distribution of UMI/reads/counts per cell ({status})")
-     
+
     if min_counts !=None:
         plt.axvline(min_counts,linestyle = '--', color = 'orange', linewidth = 2) # draws a vertical orange dashed line
     if max_counts !=None:
@@ -52,7 +52,7 @@ def qc_figures(anndata_obj:AnnData, status:str, paths_config:PathConfig, min_cou
                     kde=True,
                     alpha=0.2,
                     log_scale=True).set_title('Distribution of uniquely expressed genes per cell ({})'.format(status))
-     
+
     if min_genes != None:
         plt.axvline(min_genes, linestyle = '--', color = 'orange', linewidth = 2) # draws a vertical orange dashed line
     if max_genes != None:
@@ -63,14 +63,15 @@ def qc_figures(anndata_obj:AnnData, status:str, paths_config:PathConfig, min_cou
     #plt.show()
 
     # visual of mitochondrial contamination thresholds
+    # mito not on log scale in the event there are 0 values
     plt.figure(figsize=(10, 6))
     seaborn.histplot(data=anndata_obj.obs,
                     x="pct_counts_is_mito",
                     hue="sample_name",
                     kde=True,
                     alpha=0.2,
-                    log_scale=True).set_title('Distribution of mitochondrial counts per cell'.format(status))
-     
+                    log_scale=False).set_title('Distribution of mitochondrial counts per cell'.format(status))
+
     if max_mito != None:
         plt.axvline(max_mito, linestyle = '--', color = 'orange', linewidth = 2) # draws a vertical orange dashed line
     plt.tight_layout()
@@ -110,7 +111,7 @@ def qc_figures(anndata_obj:AnnData, status:str, paths_config:PathConfig, min_cou
         ax.axvline(x=max_counts, linestyle="dotted", color="orange", linewidth=2)
     if max_genes != None:
         ax.axhline(y=max_genes, linestyle="dotted", color="orange", linewidth=2)
-        
+
 
     plt.colorbar(scatter, ax=ax, label="pct_counts_is_mito")
     ax.set_xscale("log")
@@ -122,7 +123,7 @@ def qc_figures(anndata_obj:AnnData, status:str, paths_config:PathConfig, min_cou
     plt.tight_layout()
     plt.savefig(os.path.join(paths_config.qc_dir, f"{status}_summary_joint.png"), dpi=300)
     #plt.show()
- 
+
 
     # highlighting singlets vs doublets
     fig, ax = plt.subplots()
@@ -161,7 +162,7 @@ def plot_reductions(anndata_obj:AnnData, reduction_name:str, layer:str, ncol_lay
     '''
     For plotting umap:
     gene_symbols: str | None (default: None)
-    Column name in .var DataFrame that stores gene symbols. By default var_names refer to the index column of the .var DataFrame. Setting this option allows alternative 
+    Column name in .var DataFrame that stores gene symbols. By default var_names refer to the index column of the .var DataFrame. Setting this option allows alternative
     names to be used.
     '''
 
@@ -183,22 +184,22 @@ def plot_reductions(anndata_obj:AnnData, reduction_name:str, layer:str, ncol_lay
     '''
 
     ax = scanpy.pl.embedding(anndata_obj,
-            basis = reduction_name, 
-            layer = layer, 
-            color = groupby_col, 
+            basis = reduction_name,
+            layer = layer,
+            color = groupby_col,
             projection = '2d',
             ncols = ncol_layout,
-            add_outline = False, 
-            wspace=0.5, 
-            colorbar_loc = "bottom", 
-            color_map = continuous_col, 
+            add_outline = False,
+            wspace=0.5,
+            colorbar_loc = "bottom",
+            color_map = continuous_col,
             palette= categorical_col,
-            hspace=0.5, 
-            frameon=False, 
+            hspace=0.5,
+            frameon=False,
             marker = marker,
             show = False)
-    
-    
+
+
 
     if cluster_label:
         # Store text labels for adjustText
@@ -881,7 +882,7 @@ def pretty_highly_variable_genes(anndata_obj: AnnData, genes_to_ignore_for_clust
 
     '''
     @profile
-    def plot_violin(anndata_obj: AnnData, layer: str, groupby_col: str, data_to_plot: str, file_savename: str, save_path: Path, xlabel: str = "", ylabel: str | None = None, order: Iterable | None = None, add_points: bool = False,size: int = 1) -> None: 
+    def plot_violin(anndata_obj: AnnData, layer: str, groupby_col: str, data_to_plot: str, file_savename: str, save_path: Path, xlabel: str = "", ylabel: str | None = None, order: Iterable | None = None, add_points: bool = False,size: int = 1) -> None:
 
     # Make sure the grouping column exists
     if groupby_col not in anndata_obj.obs.columns:
@@ -1110,6 +1111,3 @@ def pretty_highly_variable_genes(anndata_obj: AnnData, genes_to_ignore_for_clust
      )
      plt.show()
     '''
-
-
-
