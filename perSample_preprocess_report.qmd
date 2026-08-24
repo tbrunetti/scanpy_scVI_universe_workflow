@@ -1,6 +1,6 @@
 ---
 title: "Sample scRNA-seq Pre-Sample Pre-processing Report"
-author: "Automated pipeline report"
+author: "Tonya Brunetti"
 
 format:
   html:
@@ -316,6 +316,23 @@ figure img {
 
 .gene-tablist {
   margin-bottom: 0.25rem;
+}
+
+/* High-visibility legend used beneath every core-gene violin plot. */
+.violin-stat-key {
+  margin: 0.8rem 0 0.55rem;
+  padding: 0.7rem 0.9rem;
+  border: 2px solid #0b7285;
+  border-radius: 0.55rem;
+  background: #e6fcf5;
+  color: #084c61;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.violin-stat-key strong {
+  color: #7b2cbf;
+  font-weight: 800;
 }
 
 </style>
@@ -766,10 +783,13 @@ PIPELINE_STEPS = [
         "id": 4,
         "name": "Cell-cycle scoring",
         "function": "calculate_cell_cycle",
-        "description": "Scores S-phase and G2/M-phase gene programs using the configured gene sets.",
-        "look_for": "There is no dedicated cell-cycle image or analysis_metadata entry produced by the current function. The scores are stored in AnnData and can be used later for interpretation or regression if desired.",
-        "metadata_keys": [],
-        "images": [],
+        "description": "Scores S-phase and G2/M-phase gene programs using the configured gene sets and records the number of cells assigned to each phase.",
+        "look_for": "Review the phase counts together with the phase-colored embeddings. The counts summarize how many cells were assigned to G1, S, and G2/M, while the embeddings show whether phase labels are broadly distributed or concentrated in particular regions of PCA/UMAP space.",
+        "metadata_keys": ["total_S_phase_cells", "total_G1_phase_cells", "total_G2M_phase_cells"],
+        "images": [
+            ("phase_initial_umap.png", "Cell-cycle phase on initial UMAP", "Each cell is colored by its Scanpy-assigned cell-cycle phase. Look for whether G1, S, and G2/M labels are broadly mixed or concentrated in distinct neighborhoods. Concentration can indicate cell-cycle structure is aligned with transcriptional state, while broad mixing suggests phase is not a dominant source of separation in this embedding."),
+            ("phase_X_pca.png", "Cell-cycle phase on PCA", "The PCA view shows where the phase assignments fall along the major principal components. Phase-associated separation along one or more PCs suggests cell-cycle programs contribute to the dominant axes of variation."),
+        ],
     },
     {
         "id": 5,
@@ -792,6 +812,7 @@ PIPELINE_STEPS = [
         "images": [
             ("pca_elbow_plot_of_hvgs.png", "PCA variance profile", "Look for the point where the curve begins to flatten. Earlier PCs generally carry more broad structure; later PCs often add progressively smaller amounts of variance."),
             ("pca_gene_loadings_of_hvgs.png", "Genes driving the first PCs", "The highest/lowest loading genes help identify what biological or technical programs are contributing to major axes of variation. Strong technical signatures warrant review before interpreting clusters biologically."),
+            ("pretty_pca_loadings.png", "Pretty PCA loadings", "This view makes the strongest positive and negative gene loadings for the leading PCs easier to compare. Genes at either extreme have larger contributions to the corresponding PC axis; inspect whether those genes represent interpretable biological programs or technical effects."),
         ],
     },
     {
@@ -803,7 +824,6 @@ PIPELINE_STEPS = [
         "metadata_keys": [],
         "images": [
             ("clustree_overall_stability.png", "Cluster stability across resolutions", "Follow how clusters split as resolution increases. Stable parent-to-child transitions are generally easier to interpret than repeated fragmentation or unstable reassignment."),
-            ("general_qc_check.png", "QC features over the UMAP", "Use these panels to see whether major QC variables align strongly with clusters. If a cluster is primarily defined by mitochondrial percentage or library size, investigate whether it reflects technical variation."),
             ("core_genes_norm_expression_umap.png", "Core-marker expression over the UMAP", "These panels show where configured marker genes are expressed. Concentrated expression can support cluster annotation, while diffuse or absent expression may mean the marker is not informative in this sample or resolution."),
         ],
     },
@@ -816,7 +836,9 @@ def metadata_summary(keys):
         value = ANALYSIS_METADATA.get(key, "Not found in saved analysis metadata")
         summary = display_value(value)
         interpretation = {
+            "mito_genes": "Complete list of genes identified by the mitochondrial regex. This is useful for checking that the feature annotation rule captured the intended genes.",
             "total_mito_genes": "Number of genes identified by the mitochondrial regex. Review the regex if this number is unexpectedly small or broad.",
+            "ribo_genes": "Complete list of genes identified by the ribosomal pattern list. This is useful for checking that the feature annotation rule captured the intended genes.",
             "total_ribo_genes": "Number of genes identified by the ribosomal pattern list. This is primarily a feature-annotation check.",
             "predicted_singlets": "Number of cells classified as singlets by ScDblFinder.",
             "predicted_doublets": "Number of cells classified as doublets by ScDblFinder; compare the fraction with the expected technology/loading rate.",
@@ -825,6 +847,9 @@ def metadata_summary(keys):
             "total_cells_remaining_postfilter": "Cells retained after the configured QC and optional doublet-removal rules.",
             "total_genes_remaining_postfilter": "Gene features retained after cell filtering; gene count changes mainly if the object representation changes upstream.",
             "genes_ignored_for_hvg_selection": "Genes deliberately excluded from HVG selection by the configured regex, commonly to avoid clonotype-driven clustering bias.",
+            "total_S_phase_cells": "Number of cells assigned to S phase by Scanpy's cell-cycle scoring.",
+            "total_G1_phase_cells": "Number of cells assigned to G1 phase by Scanpy's cell-cycle scoring.",
+            "total_G2M_phase_cells": "Number of cells assigned to G2/M phase by Scanpy's cell-cycle scoring.",
             "pcs_to_use": "Automated PCA cutoff used as the input dimensionality for neighborhood construction.",
         }.get(key, "Run-specific output recorded by the pipeline.")
         rows.append({"Metadata key": key, "Saved value / summary": summary, "General interpretation": interpretation})
@@ -1119,7 +1144,7 @@ print(step["description"])
 ::: {.callout-warning}
 ### How to interpret this step
 
-Cell-cycle scoring summarizes expression of predefined S-phase and G2/M programs. High scores indicate that a cell's expression resembles the corresponding gene program. The current pipeline computes the scores but does not automatically regress them from the expression matrix in this step.
+Cell-cycle scoring summarizes expression of predefined S-phase and G2/M programs. High scores indicate that a cell’s expression resembles the corresponding gene program. The phase counts below report how many cells were assigned to G1, S, and G2/M. The phase embeddings then show how those assignments are distributed across the major PCA axes and the initial UMAP neighborhood structure. The current pipeline computes the scores but does not automatically regress them from the expression matrix in this step.
 :::
 
 ### Step-specific analysis metadata
@@ -1128,9 +1153,23 @@ Cell-cycle scoring summarizes expression of predefined S-phase and G2/M programs
 show_table(metadata_summary(PIPELINE_STEPS[4]["metadata_keys"]))
 ```
 
-### Generated outputs
+### Cell-cycle phase across embeddings
 
-No dedicated figure or `analysis_metadata` entry is produced by the current cell-cycle scoring function.
+::: {.panel-tabset}
+
+## Initial UMAP
+
+```{python}
+show_images([PIPELINE_STEPS[4]["images"][0]])
+```
+
+## PCA
+
+```{python}
+show_images([PIPELINE_STEPS[4]["images"][1]])
+```
+
+:::
 
 ---
 
@@ -1194,6 +1233,12 @@ show_images([PIPELINE_STEPS[6]["images"][0]])
 
 ```{python}
 show_images([PIPELINE_STEPS[6]["images"][1]])
+```
+
+## Pretty gene loadings
+
+```{python}
+show_images([PIPELINE_STEPS[6]["images"][2]])
 ```
 
 :::
@@ -1266,17 +1311,29 @@ if global_clustree_genes:
     display(HTML("".join(clustree_html)))
 ```
 
-## QC on UMAP
+## Core-gene expression on UMAP
 
 ```{python}
 show_images([PIPELINE_STEPS[7]["images"][1]])
 ```
 
-## Core-gene expression on UMAP
+## Final QC on embeddings
+
+::: {.panel-tabset}
+
+### PCA
 
 ```{python}
-show_images([PIPELINE_STEPS[7]["images"][2]])
+show_images([("final_qc_X_pca.png", "Final QC metrics on PCA", "These panels map count depth, detected genes, mitochondrial percentage, and ribosomal percentage onto the final PCA embedding. Look for strong concentration of QC variables in particular regions or along a dominant axis, which can indicate that technical variation contributes substantially to the embedding.")])
 ```
+
+### Initial UMAP
+
+```{python}
+show_images([("final_qc_initial_umap.png", "Final QC metrics on initial UMAP", "These panels show the same QC variables on the initial UMAP. Use them to check whether clusters or neighborhoods are strongly associated with library size, detected genes, mitochondrial percentage, or ribosomal percentage.")])
+```
+
+:::
 
 :::
 
@@ -1335,7 +1392,8 @@ else:
                 gene_panels.append(
                     f"<div class='gene-tab-panel{active_class}' id='{gene_panel_id}' role='tabpanel' tabindex='0'{hidden}>"
                     f"<figure class='resolution-figure'><img src='{uri}' alt='Normalized expression violin plot for {gene} at Leiden resolution {resolution_name}'></figure>"
-                    "<p><strong>How to read it.</strong> Compare the distribution across clusters, including the median/mean and the spread or fraction of expressing cells. A marker is more informative when expression is enriched in a coherent subset rather than broadly distributed across all clusters.</p>"
+                    "<div class='violin-stat-key'><strong>◆ Diamond = median expression</strong> &nbsp;&nbsp;|&nbsp;&nbsp; <strong>━ Crossbar = mean expression</strong></div>"
+                    "<p><strong>How to read it.</strong> Compare the expression distribution across clusters together with the median (diamond), mean (horizontal crossbar), and overall spread. A marker is more informative when expression is enriched in a coherent subset rather than broadly distributed across all clusters.</p>"
                     "</div>"
                 )
 
