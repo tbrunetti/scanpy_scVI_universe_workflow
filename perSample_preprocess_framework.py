@@ -3,7 +3,7 @@ import path_config
 import anndata
 from cli import parse_args
 from path_config import PathConfig
-from per_sample_preprocessing import generate_h5ad, add_qcmetrics_and_metadata, cell_filtering, normalize_and_transform, calculate_cell_cycle, identify_and_transform_hvgs, pca, neighbors_umap_clust
+from per_sample_preprocessing import generate_h5ad, add_qcmetrics_and_metadata, cell_filtering, normalize_and_transform, calculate_cell_cycle, identify_and_transform_hvgs, pca, neighbors_umap_clust, final_qc_images
 from visualization import qc_figures, plot_reductions
 from pipeline_reporting import generate_quarto_report
 
@@ -95,9 +95,11 @@ def run_pipeline():
                 paths_config = paths)
 
     # STEP4: calculate and infer cell cycle
-    anndata_obj = calculate_cell_cycle(anndata_obj = anndata_obj,
+    anndata_obj, analysis_metadata = calculate_cell_cycle(anndata_obj = anndata_obj,
                 s_genes = config.s_genes,
-                g2m_genes = config.g2m_genes)
+                g2m_genes = config.g2m_genes,
+                analysis_metadata = analysis_metadata,
+                paths_config = paths)
     
     #STEP5: idenfity high variably genes to use for clustering
     anndata_obj, analysis_metadata = identify_and_transform_hvgs(anndata_obj = anndata_obj,
@@ -124,7 +126,16 @@ def run_pipeline():
                 resolutions = config.resolutions,
                 addl_genes = config.core_genes_to_plot,
                 paths_config = paths)
-    
+
+    #STEP8: genearte final set of QC metic images on different embeddings
+    plot_embeddigs = ["X_pca", "initial_umap"]
+    for embedding in plot_embeddigs:
+        final_qc_images(anndata_obj = anndata_obj, 
+                    reduction = embedding, 
+                    layer = "normalized",
+                    paths_config = paths)
+
+
     # --------------------------------------------------
     # FINAL: generate HTML pipeline report
     # --------------------------------------------------
