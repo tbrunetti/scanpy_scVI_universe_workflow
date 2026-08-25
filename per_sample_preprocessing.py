@@ -381,7 +381,8 @@ def normalize_and_transform(anndata_obj:AnnData, paths_config = PathConfig, size
     logging.info("Normalization and transformation of counts")
 
     # save a copy of the raw counts to the counts layer (X is the active layer and when normalization is applied it applies to X)
-    anndata_obj.layers['counts'] = anndata_obj.X.copy()
+    # also save it as sparse to reduce the RAM
+    anndata_obj.layers["counts"] = scipy.sparse.csr_matrix(anndata_obj.X)
     scanpy.pp.normalize_total(anndata_obj, target_sum = None, layer = None, exclude_highly_expressed = False, inplace = True)
     scanpy.pp.log1p(anndata_obj, base = None, chunked = None, chunk_size = None, layer = None)
 
