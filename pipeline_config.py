@@ -43,7 +43,9 @@ from dataclasses import dataclass, field, fields, replace
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Self
+from typing import Any, Self, TypeAlias
+from enum import Enum
+
 from gene_sets import CELL_CYCLE_GENE_SETS
 
 
@@ -84,7 +86,141 @@ def _as_path(value: Any) -> Path | None:
 
 
 # ---------------------------------------------------------------------
-# PipelineConfig
+# Workflow identifiers
+# ---------------------------------------------------------------------
+
+# sets up pipeline config depending on which worflow is implemented
+# Identifies which workflow configuration is stored in PipelineConfig.
+class WorkflowType(str, Enum):
+    """Supported project workflow types.
+
+    Only PER_SAMPLE is implemented at this stage. The remaining values are
+    included now so the configuration architecture has a stable place for
+    future workflows without exposing their CLI arguments yet.
+    """
+
+    PER_SAMPLE = "per_sample"
+    MULTI_SAMPLE = "multi_sample"
+    INTEGRATION = "integration"
+    ANNOTATION = "annotation"
+
+
+# ---------------------------------------------------------------------
+# Workflow-specific configuration
+# ---------------------------------------------------------------------
+
+
+@dataclass(slots=True, frozen=True)
+class PerSampleConfig:
+    """Configuration specific to the per-sample preprocessing workflow."""
+
+    # Input / sample identity
+    filtered_feature_bc_matrix: Path | None   # Input matrix location for new project runs. Resume runs do not need to start from raw input again.
+    sample_name: str | None   # Sample label used in metadata and figures.
+    platform: str   # Technology/platform name, such as parse, 10x, or bdrhapsody.
+    convert_ensembl: bool    # Whether Ensembl IDs should be collapsed to gene symbols.
+    metadata: tuple[tuple[str, str], ...] | None  #  Optional user metadata supplied as key/value pairs. Why tuples instead of lists? The config is frozen, so the stored value should also be immutable.
+
+    # Cell filtering and QC
+    min_cells_expressed: int
+    min_unique_genes: int
+    min_umi_counts: int
+    mito_contam: float
+    max_unique_genes: int | None
+    max_umi_counts: int | None
+    min_complexity: float
+    mito_regex: str
+    ribo_regex: tuple[str, ...]
+    dbl_rate: float
+    remove_doublets: bool
+
+    # Cell cycle
+    s_genes: tuple[str, ...]
+    g2m_genes: tuple[str, ...]
+
+    # Normalization / transformation
+    size_factor: int | None
+    save_memory: bool
+    data_chunk_size: int | None
+    n_hvgs: int
+    regress_vars: tuple[str, ...]
+    hvg_ignore: str
+
+    # Dimensionality reduction / clustering
+    pca_var_change: float
+    neighbors: int
+    resolutions: tuple[float, ...]
+    dist_metric: str
+    top_genes_per_cluster_to_plot: int
+    core_genes_to_plot: tuple[str, ...]
+
+    @classmethod
+    def from_namespace(cls, ns: Namespace) -> Self:
+        """Build the per-sample configuration from the per-sample CLI namespace."""
+        raw = vars(ns)
+        config_fields = {field.name for field in fields(cls)}
+
+        missing_fields = config_fields - raw.keys()
+        if missing_fields:
+            raise ValueError(
+                "The per-sample argparse Namespace is missing required "
+                "PerSampleConfig fields: "
+                + ", ".join(sorted(missing_fields))
+            )
+
+        data = {name: raw[name] for name in config_fields}
+
+        data["filtered_feature_bc_matrix"] = _as_path(
+            data["filtered_feature_bc_matrix"]
+        )
+
+        data["metadata"] = (
+            tuple(tuple(pair) for pair in data["metadata"])
+            if data["metadata"] is not None
+            else None
+        )
+
+        data["ribo_regex"] = tuple(data["ribo_regex"])
+        data["regress_vars"] = tuple(data["regress_vars"])
+        data["resolutions"] = tuple(data["resolutions"])
+        data["core_genes_to_plot"] = tuple(data["core_genes_to_plot"])
+
+        # Select the resolved cell-cycle gene sets. The model itself remains
+        # a CLI concern; the persisted workflow config stores the actual gene
+        # lists used by the run.
+        if ns.cell_cycle_model in CELL_CYCLE_GENE_SETS:
+            gene_set = CELL_CYCLE_GENE_SETS[ns.cell_cycle_model]
+            data["s_genes"] = tuple(gene_set["s_genes"])
+            data["g2m_genes"] = tuple(gene_set["g2m_genes"])
+        elif ns.cell_cycle_model == "custom":
+            if ns.s_genes is None or ns.g2m_genes is None:
+                raise ValueError(
+                    "--s_genes and --g2m_genes are required "
+                    "when --cell_cycle_model custom"
+                )
+            data["s_genes"] = tuple(ns.s_genes)
+            data["g2m_genes"] = tuple(ns.g2m_genes)
+
+        return cls(**data)
+
+# ---------------------------------------------------------------------
+# Workflow configuration type
+# ---------------------------------------------------------------------
+
+# At this stage only the per-sample workflow configuration exists.
+# As additional workflow configs are implemented, this becomes a union:
+#
+# WorkflowConfig: TypeAlias = (
+#     PerSampleConfig
+#     | MultiSampleConfig
+#     | IntegrationConfig
+#     | AnnotationConfig
+# )
+WorkflowConfig: TypeAlias = PerSampleConfig
+
+
+# ---------------------------------------------------------------------
+# PipelineConfig for Project-level configuration
 # ---------------------------------------------------------------------
 #
 # PipelineConfig is the immutable record of the analysis run.
@@ -131,8 +267,13 @@ def _as_path(value: Any) -> Path | None:
 @dataclass(slots=True, frozen=True)
 class PipelineConfig:
     """
-    Typed, immutable snapshot of the parameters that define a run.
+    The project-level fields are shared by all workflows. Workflow-specific
+    settings are stored in the ``workflow`` object. The concrete workflow
+    configuration is selected from ``workflow_type`` when the project is
+    created.
     """
+
+    workflow_type: WorkflowType
 
     # Root directory for the analysis project.
     #
@@ -149,74 +290,15 @@ class PipelineConfig:
     # run begins.
     save_prefix: str
 
-    # Input matrix location for new project runs.
-    #
-    # Why optional?
-    # Resume runs do not need to start from raw input again.
-    filtered_feature_bc_matrix: Path | None
-
-    # Sample label used in metadata and figures.
-    sample_name: str | None
-
-    # Technology/platform name, such as parse, 10x, or bdrhapsody.
-    platform: str 
-
-    # Whether Ensembl IDs should be collapsed to gene symbols.
-    convert_ensembl: bool 
-
-    # Optional user metadata supplied as key/value pairs.
-    #
-    # Why tuples instead of lists?
-    # The config is frozen, so the stored value should also be immutable.
-    metadata: tuple[tuple[str, str], ...] | None
-
     # Reproducibility controls.
     seed: int
     threads: int
 
-    # QC thresholds.
-    min_cells_expressed: int
-    min_unique_genes: int
-    min_umi_counts: int
-    mito_contam: float
-    max_unique_genes: int | None
-    max_umi_counts: int | None
-    min_complexity: float
-    mito_regex: str
-    ribo_regex: tuple[str, ...]
-    dbl_rate: float
-    remove_doublets: bool
-    s_genes: tuple[str, ...]
-    g2m_genes: tuple[str, ...]
-    
-    # Normalization / transformation controls .
-    size_factor: int | None
-    save_memory: bool
-    data_chunk_size: int | None
-    n_hvgs: int
-    regress_vars: tuple[str, ...]
-    hvg_ignore: str
-
-    # Dimensionality reduction and clustering controls.
-    pca_var_change: float
-    neighbors: int
-    resolutions: tuple[float, ...]
-    dist_metric: str
-    top_genes_per_cluster_to_plot: int
-    core_genes_to_plot: tuple[str, ...]
-
-    '''
-    # Differential expression settings.- SAVE FOR DIFFERENT PIPELINE
-    de_test: str
-    min_pct_plot_filter: float
-    max_padj_plot_filter: float
-    '''
-
+    workflow: WorkflowConfig
 
     # One timestamp attached to the run so saved artifacts stay consistent.
     run_date: str = field(default_factory=_today_stamp)
 
-    
 
     # -----------------------------------------------------------------
     # Construction
@@ -239,79 +321,30 @@ class PipelineConfig:
     #   If those names drift, this method needs to be updated.
     @classmethod
     def from_namespace(cls, ns: Namespace) -> Self:
-        """
-        Convert the fully parsed argparse Namespace into a PipelineConfig.
-
-        argparse is responsible for applying defaults and converting CLI input
-        into the correct basic Python types. This method then verifies that the
-        Namespace contains every field required by PipelineConfig and performs
-        any additional normalization needed for the config object.
-
-        Keeping this check here prevents a typo or rename in the CLI from silently
-        causing a parameter to disappear from the configuration.
-        """
-
-        raw = vars(ns)
-
-        # Get the fields that PipelineConfig requires.
-        config_fields = {field.name for field in fields(cls)}
-
-        # Fields that are intentionally added by PipelineConfig rather than
-        # argparse. These are created after parsing and therefore should not be
-        # required in the Namespace.
-        internally_created_fields = {"run_date"}
-
-        required_fields = config_fields - internally_created_fields
-
-        # Check that every expected config field was supplied by argparse.
-        missing_fields = required_fields - raw.keys()
-
-        if missing_fields:
+        """Build a PipelineConfig from the selected workflow namespace."""
+        if ns.run_mode != "newProject":
             raise ValueError(
-                "The argparse Namespace is missing required PipelineConfig fields: "
-                + ", ".join(sorted(missing_fields))
+                "PipelineConfig.from_namespace() expects a newProject namespace."
             )
 
-        # Copy the argparse values into the config.
-        data = {name: raw[name] for name in required_fields}
+        workflow_type = WorkflowType(ns.workflow_type)
 
-        # Convert paths into normalized pathlib.Path objects.
-        for key in (
-            "working_dir",
-            "filtered_feature_bc_matrix"
-        ):
-            data[key] = _as_path(data[key])
+        if workflow_type is not WorkflowType.PER_SAMPLE:
+            raise NotImplementedError(
+                f"Workflow '{workflow_type.value}' is not implemented yet. "
+                "Only 'per_sample' is currently available."
+            )
 
-        # argparse returns lists for nargs="+". Convert them to tuples because
-        # PipelineConfig is frozen and should not contain mutable collections.
-        data["metadata"] = (
-            tuple(tuple(pair) for pair in data["metadata"])
-            if data["metadata"] is not None
-            else None
+        workflow = PerSampleConfig.from_namespace(ns)
+
+        return cls(
+            workflow_type=workflow_type,
+            working_dir=_as_path(ns.working_dir),
+            save_prefix=ns.save_prefix,
+            seed=ns.seed,
+            threads=ns.threads,
+            workflow=workflow,
         )
-
-        data["ribo_regex"] = tuple(data["ribo_regex"])
-        data["regress_vars"] = tuple(data["regress_vars"])
-        data["resolutions"] = tuple(data["resolutions"])
-        data["core_genes_to_plot"] = tuple(data["core_genes_to_plot"])
-        
-        # Select a model for the cell-cycle gene sets.
-        # If custom, pull the genes supplied through argparse.
-
-        if ns.cell_cycle_model in CELL_CYCLE_GENE_SETS:
-            gene_set = CELL_CYCLE_GENE_SETS[ns.cell_cycle_model]
-            data["s_genes"] = tuple(gene_set["s_genes"])
-            data["g2m_genes"] = tuple(gene_set["g2m_genes"])
-
-        elif ns.cell_cycle_model == "custom":
-            if ns.s_genes is None or ns.g2m_genes is None:
-                raise ValueError(
-                    "--s_genes and --g2m_genes are required "
-                    "when --cell_cycle_model custom"
-                )
-
-        return cls(**data)
-
     
     # -----------------------------------------------------------------
     # Persistence
@@ -334,12 +367,13 @@ class PipelineConfig:
         if isinstance(obj, cls):
             return obj
 
-        if isinstance(obj, dict):
-            return cls(**obj)
-
-        raise TypeError(f"Unsupported config payload in {path!s}: {type(obj)!r}")
-
+        raise TypeError(
+            f"Unsupported config payload in {path!s}: {type(obj)!r}. "
+            "Expected a PipelineConfig instance."
+        )
+    
     def save(self, path: str | Path) -> None:
+        """Persist the complete project configuration for resume/reproducibility."""
         with open(path, "wb") as f:
             pickle.dump(self, f)
 
@@ -358,13 +392,29 @@ class PipelineConfig:
     # Why this can be inconvenient:
     # - Slightly more verbose than assigning a new attribute.
     def with_updates(self, **changes: Any) -> Self:
+        """Create an updated config without mutating the frozen instance."""
         normalized = dict(changes)
 
-        for key in ("working_dir", "filtered_feature_bc_matrix"):
-            if key in normalized:
-                normalized[key] = _as_path(normalized[key])
+        if "working_dir" in normalized:
+            normalized["working_dir"] = _as_path(normalized["working_dir"])
 
         return replace(self, **normalized)
+
+
+    def __getattr__(self, name: str) -> Any:
+        """Temporary compatibility bridge for the existing per-sample framework.
+
+        Once the per-sample framework is refactored, calls such as
+        ``config.n_hvgs`` can become ``config.workflow.n_hvgs`` and this bridge
+        can be removed.
+        """
+        workflow = object.__getattribute__(self, "workflow")
+        try:
+            return getattr(workflow, name)
+        except AttributeError as exc:
+            raise AttributeError(
+                f"{type(self).__name__!s} has no attribute {name!r}"
+            ) from exc
 
     # -----------------------------------------------------------------
     # Compatibility bridge
@@ -380,5 +430,19 @@ class PipelineConfig:
     # - It should only be temporary; the long-term goal is for the pipeline
     #   to consume PipelineConfig directly.
     def as_namespace(self) -> SimpleNamespace:
-        payload = {f.name: getattr(self, f.name) for f in fields(self)}
+        """Compatibility view of the project config for older callers."""
+        payload = {
+            "workflow_type": self.workflow_type.value,
+            "working_dir": self.working_dir,
+            "save_prefix": self.save_prefix,
+            "seed": self.seed,
+            "threads": self.threads,
+            "run_date": self.run_date,
+        }
+        payload.update(
+            {
+                field.name: getattr(self.workflow, field.name)
+                for field in fields(self.workflow)
+            }
+        )
         return SimpleNamespace(**payload)

@@ -1,2 +1,5 @@
-# scanpy_scVI_universe_workflow
-framework for scRNAseq analysis in python
+workflows/
+ * WHAT steps to run, and in what order
+
+ processing/
+  * HOW each individual step works (the actual function definitions)

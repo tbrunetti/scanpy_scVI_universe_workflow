@@ -20,17 +20,22 @@ def convert_to_tuple(item: str) -> tuple[str, str]:
     return key, value
 
 
-def add_environment_args(parser: argparse.ArgumentParser) -> None:
-    g = parser.add_argument_group("Environment and project setup")
-    g.add_argument("--working_dir", type=Path, default=Path.cwd(), help = "Path to directory where project will be hosted")
-    g.add_argument("--save_prefix", type=str, default="", help = "String that represents the project name; no special characters, only alphanumeric and hyphens, no whitespace.")
+# These are arguments shared by every future project workflow.
+def add_project_args(parser: argparse.ArgumentParser) -> None:
+    g = parser.add_argument_group("Project setup")
+    g.add_argument("--working_dir", type=Path, default=Path.cwd(), help="Path to directory where project will be hosted.")
+    g.add_argument("--save_prefix", type=str, default="", help="String representing the project name; no special characters, only alphanumeric and hyphens, no whitespace.")
+    g.add_argument("--seed", type=int, default=42, help="Seed used for reproducibility when algorithms are non-deterministic.")
+    g.add_argument("--threads", type=int, default=5, help="Number of parallel processes to spawn when a function can be parallelized.")
+
+# Per-sample workflow input and sample metadata arguments
+def add_per_sample_environment_args(parser: argparse.ArgumentParser) -> None:
+    g = parser.add_argument_group("Per-sample input and sample setup")
     g.add_argument("--filtered_feature_bc_matrix", type=Path,  help = "Path to counts matrix, barcodes file, and feature/gene files")
     g.add_argument("--sample_name", type=str, help = "name of sample being processed; alphanumeric, no special characters but hyphens acceptable. No whitespace.")
     g.add_argument("--platform", choices=["parse", "10x", "bdrhapsody"], default="parse", help = "single cell platform used for library preparation")
     g.add_argument("--convertEnsembl", action="store_true", dest="convert_ensembl", help = "If features/gene names are ensembl be sure to convert to gene names; most relevant for Parse platforms. Check features file to determine if this should/needs to be converted.")
     g.add_argument("--metadata", nargs="+", type=convert_to_tuple, default=None, help = "Ex: --metadata sex=female batch=A tissue=spleen age=100 group=\"Control group\"") # each time a key value pair is listed, it converts to a tuple and the tuple will be collected as a list based on argparse nargs
-    g.add_argument("--seed", type=int, default=42, help = "When algorithms are non-deterministic, this is the seed that be used for reproducibility purposes.")
-    g.add_argument("--threads", type=int, default=5, help = "The number of parallel processes to spawn off when a function can be parallelized.")
 
 
 def add_filtering_args(parser: argparse.ArgumentParser) -> None:
@@ -71,15 +76,14 @@ def add_clustering_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument("--top_genes_per_cluster_to_plot", type=int, default=5, help = "When generating dot plots, how many top genes to plot per cluster.")
     g.add_argument("--core_genes_to_plot", nargs="+", type=str, default=["CD3E", "CD3D", "CD4", "CD8A", "CD8B", "CD19", "MS4A1", "CD79A", "CD79B"], help = "The set of genes that are always plotted regardless if they are top genes or not.")
 
+# Attach all arguments currently used by the per-sample workflow.
+def add_per_sample_args(parser: argparse.ArgumentParser) -> None:
+    add_project_args(parser)
+    add_per_sample_environment_args(parser)
+    add_filtering_args(parser)
+    add_normalization_args(parser)
+    add_clustering_args(parser)
 
-'''
-SAVE FOR A DIFFERENT PIPELINE
-def add_de_args(parser: argparse.ArgumentParser) -> None:
-    g = parser.add_argument_group("Differential expression")
-    g.add_argument("--de_test", choices=["pyMAST", "wilcoxon", "logreg", "t-test", "t-test_overestim_var"], default="pyMAST")
-    g.add_argument("--min_pct_plot_filter", type=float, default=0.0)
-    g.add_argument("--max_padj_plot_filter", type=float, default=0.05)
-'''
 
 def add_resume_args(parser: argparse.ArgumentParser) -> None:
     g = parser.add_argument_group("Resume")
@@ -89,30 +93,33 @@ def add_resume_args(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Per-sample scRNA-seq analysis",
+        description="scRNA-seq analysis project framework",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        allow_abbrev=False,
-    )
+        allow_abbrev=False
+        )
 
     subparsers = parser.add_subparsers(dest="run_mode", required=True)
 
-    new_project = subparsers.add_parser("newProject", help="Start a new sample analysis")
-    add_environment_args(new_project)
-    add_filtering_args(new_project)
-    add_normalization_args(new_project)
-    add_clustering_args(new_project)
-    #add_de_args(new_project)
+    # ---------------------------------------------------------------
+    # New project workflows
+    # ---------------------------------------------------------------
+    new_project = subparsers.add_parser("newProject", help="Start a new analysis project")
+    workflow_subparsers = new_project.add_subparsers(dest="workflow_type", required=True)
+    per_sample = workflow_subparsers.add_parser("per_sample", help="Start a new per-sample preprocessing project.")
+    
+    add_per_sample_args(per_sample)
 
-    resume = subparsers.add_parser("resume", help="Resume from a saved config")
+    # ---------------------------------------------------------------
+    # Resume existing project
+    # ---------------------------------------------------------------
+    resume = subparsers.add_parser("resume", help="Resume from a saved project configuration.")
     add_resume_args(resume)
 
     return parser
+    
 
-
-# determines if to generate an object of type PipelineConfig because it is a new project and will be populated
-# based on argparse namespaces or if resuming, it should just load in the argparse namespace from the original
-# new project creation
 def parse_args(argv: Sequence[str] | None = None) -> PipelineConfig:
+    # Parse CLI input and return a persisted-project configuration object.
     parser = build_parser()
     ns = parser.parse_args(argv)
 
@@ -129,5 +136,5 @@ def parse_args(argv: Sequence[str] | None = None) -> PipelineConfig:
 
         return config
 
-    # throw error if runmode is not recognized
     raise ValueError(f"Unknown run mode: {ns.run_mode}")
+

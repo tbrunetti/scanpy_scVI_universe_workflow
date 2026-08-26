@@ -36,7 +36,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Self
 
-from pipeline_config import PipelineConfig
+from pipeline_config import PipelineConfig, WorkflowType
 
 
 # ---------------------------------------------------------------------
@@ -81,6 +81,9 @@ class PathConfig:
     # across all outputs written during a single analysis.
     run_date: str
 
+    # Class that identifies which workflow configuration is stored in PipelineConfig
+    workflow_type: WorkflowType
+
     # Build a PathConfig from PipelineConfig.
     #
     # How this fits into the architecture:
@@ -96,7 +99,27 @@ class PathConfig:
             working_dir=config.working_dir,
             save_prefix=config.save_prefix,
             run_date=config.run_date,
+            workflow_type = config.workflow_type
         )
+
+    # -----------------------------------------------------------------
+    # Workflow identity / future extension points
+    # -----------------------------------------------------------------
+
+    @property
+    def workflow_dir(self) -> Path:
+        """Root directory reserved for workflow-specific outputs."""
+        return self.working_dir / self.workflow_type.value
+
+    @property
+    def per_sample_dir(self) -> Path:
+        """Directory reserved for future per-sample-specific additions."""
+        return self.working_dir / WorkflowType.PER_SAMPLE.value
+
+    # -----------------------------------------------------------------
+    # Existing base project paths
+    # -----------------------------------------------------------------
+
 
     # Directory containing AnnData checkpoint files.
     #
@@ -145,6 +168,10 @@ class PathConfig:
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
         self.cluster_dir.mkdir(parents=True, exist_ok=True)
 
+    # -----------------------------------------------------------------
+    # Existing per-sample artifacts
+    #------------------------------------------------------------------
+    
     # defined path and file name for the metadata that is calculated on the project level
     # metrics and saved as a pickle file and works like an unstructured dictionary
     @property
