@@ -29,7 +29,7 @@ def add_project_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument("--threads", type=int, default=5, help="Number of parallel processes to spawn when a function can be parallelized.")
 
 # Per-sample workflow input and sample metadata arguments
-def add_per_sample_environment_args(parser: argparse.ArgumentParser) -> None:
+def add_per_sample_specific_args(parser: argparse.ArgumentParser) -> None:
     g = parser.add_argument_group("Per-sample input and sample setup")
     g.add_argument("--filtered_feature_bc_matrix", type=Path,  help = "Path to counts matrix, barcodes file, and feature/gene files")
     g.add_argument("--sample_name", type=str, help = "name of sample being processed; alphanumeric, no special characters but hyphens acceptable. No whitespace.")
@@ -37,6 +37,9 @@ def add_per_sample_environment_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument("--convertEnsembl", action="store_true", dest="convert_ensembl", help = "If features/gene names are ensembl be sure to convert to gene names; most relevant for Parse platforms. Check features file to determine if this should/needs to be converted.")
     g.add_argument("--metadata", nargs="+", type=convert_to_tuple, default=None, help = "Ex: --metadata sex=female batch=A tissue=spleen age=100 group=\"Control group\"") # each time a key value pair is listed, it converts to a tuple and the tuple will be collected as a list based on argparse nargs
 
+def add_multi_sample_specific_args(parser: argparse.ArgumentParser) -> None:
+    g = parser.add_argument_group("Multi-sample input and setup")
+    g.add_argument("--anndata_file", type = Path, required = True, help = "Path to a text file containing one input H5AD path per line." )
 
 def add_filtering_args(parser: argparse.ArgumentParser) -> None:
     g = parser.add_argument_group("Cell filtering and QC")
@@ -79,10 +82,15 @@ def add_clustering_args(parser: argparse.ArgumentParser) -> None:
 # Attach all arguments currently used by the per-sample workflow.
 def add_per_sample_args(parser: argparse.ArgumentParser) -> None:
     add_project_args(parser)
-    add_per_sample_environment_args(parser)
+    add_per_sample_specific_args(parser)
     add_filtering_args(parser)
     add_normalization_args(parser)
     add_clustering_args(parser)
+
+# add all arguments currently used by the mulit-sample workflow
+def add_multi_sample_args(parser: argparse.ArgumentParser) -> None:
+    add_project_args(parser)
+
 
 
 def add_resume_args(parser: argparse.ArgumentParser) -> None:

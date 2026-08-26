@@ -203,6 +203,70 @@ class PerSampleConfig:
 
         return cls(**data)
 
+
+@dataclass(slots=True, frozen=True)
+class MultiSampleConfig:
+    """Configuration specific to the multi-sample processing workflow."""
+
+    # Input AnnData objects
+    anndata_file: Path
+    anndata_paths: tuple[Path, ...]
+
+    @classmethod
+    def from_namespace(cls, ns: Namespace) -> Self:
+        """Build the multi-sample configuration from the multi-sample CLI namespace."""
+        raw = vars(ns)
+        config_fields = {field.name for field in fields(cls)}
+
+        missing_fields = config_fields - raw.keys()
+        if missing_fields:
+            raise ValueError(
+                "The multi-sample argparse Namespace is missing required "
+                "MultiSampleConfig fields: "
+                + ", ".join(sorted(missing_fields))
+            )
+
+        data = {name: raw[name] for name in config_fields}
+
+        # Path to the text file containing one H5AD path per line.
+        anndata_file = _as_path(data["anndata_file"])
+
+        if anndata_file is None or not anndata_file.is_file():
+            raise FileNotFoundError(
+                f"AnnData input list was not found: {anndata_file}"
+            )
+
+        # Read one H5AD path from each non-empty line in the manifest.
+        with anndata_file.open("r") as f:
+            anndata_paths = tuple(
+                _as_path(line.strip())
+                for line in f
+                if line.strip()
+            )
+
+        if not anndata_paths:
+            raise ValueError(
+                f"AnnData input list contains no H5AD paths: {anndata_file}"
+            )
+
+        # Make sure every listed H5AD file exists before the workflow starts.
+        missing_h5ads = [
+            path for path in anndata_paths
+            if path is None or not path.is_file()
+        ]
+
+        if missing_h5ads:
+            raise FileNotFoundError(
+                "The following H5AD files listed in the AnnData input list "
+                "were not found:\n"
+                + "\n".join(str(path) for path in missing_h5ads)
+            )
+
+        data["anndata_file"] = anndata_file
+        data["anndata_paths"] = anndata_paths
+
+        return cls(**data)
+
 # ---------------------------------------------------------------------
 # Workflow configuration type
 # ---------------------------------------------------------------------
@@ -216,7 +280,7 @@ class PerSampleConfig:
 #     | IntegrationConfig
 #     | AnnotationConfig
 # )
-WorkflowConfig: TypeAlias = PerSampleConfig
+WorkflowConfig: TypeAlias = PerSampleConfig | MultiSampleConfig
 
 
 # ---------------------------------------------------------------------
@@ -329,11 +393,15 @@ class PipelineConfig:
 
         workflow_type = WorkflowType(ns.workflow_type)
 
-        if workflow_type is not WorkflowType.PER_SAMPLE:
+        if workflow_type is WorkflowType.PER_SAMPLE:
+            workflow = PerSampleConfig.from_namespace(ns)
+
+        elif workflow_type is WorkflowType.MULTI_SAMPLE:
+            workflow = MultiSampleConfig.from_namespace(ns)
+
+        else:
             raise NotImplementedError(
-                f"Workflow '{workflow_type.value}' is not implemented yet. "
-                "Only 'per_sample' is currently available."
-            )
+                f"Workflow '{workflow_type.value}' is not implemented yet.")
 
         workflow = PerSampleConfig.from_namespace(ns)
 

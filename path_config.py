@@ -202,3 +202,8 @@ class PathConfig:
     @property
     def filtered_h5ad(self) -> Path:
         return self.h5ad_dir / f"filtered_geneSymbol_{self.save_prefix}_{self.run_date}.h5ad"
+    
+    # merged anndata checkpoint file, created during multi-sample workflow
+    @property
+    def merged_h5ad(self) -> Path:
+        return self.h5ad_dir / f"merged_{self.save_prefix}_{self.run_date}.h5ad"
