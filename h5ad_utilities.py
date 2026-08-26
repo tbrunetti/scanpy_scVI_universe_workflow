@@ -1,3 +1,4 @@
+from pathlib import Path
 import scanpy
 import scipy.sparse as sp
 import numpy as np
@@ -83,3 +84,43 @@ def check_h5ad_sparsity(h5ad_path:str, layer:str|None = None) -> None:
                 print(f"  Nonzero fraction: {nonzero_fraction:.4%}")
                 print(f"  Zero fraction: {1 - nonzero_fraction:.4%}")
                 print(f"  CSR: False")
+
+
+# if there is a lyser that is not sparse already and you would like to turn it into a sparse CSR matrix
+# then you can run this function
+def convert_counts_to_csr(h5ad_path:Path, layer:str|None = None, output_path:Path|None = None) -> None:
+    """
+    Convert parameter specified layer in an H5AD file to CSR sparse format.
+
+    The original file is not modified unless input_path == output_path.
+    """
+
+    h5ad_path = Path(h5ad_path)
+
+    if output_path is None:
+        output_path = h5ad_path.with_name(h5ad_path.stem + "_sparse.h5ad")
+    else:
+        output_path = Path(output_path)
+
+    anndata_obj = scanpy.read_h5ad(h5ad_path)
+
+
+    if layer == None:
+        print("Working on active layer (.X)")
+        counts = anndata_obj.X
+    elif layer not in anndata_obj.layers:
+        raise KeyError(f"No {layer} layer found in {h5ad_path}")
+    else:
+        counts = anndata_obj.layers[layer]
+
+    if sp.isspmatrix_csr(counts):
+        print(f"{h5ad_path.name}: already CSR")
+    else:
+        print(f"{h5ad_path.name}: converting {type(counts)} -> CSR")
+        anndata_obj.layers[layer] = sp.csr_matrix(counts)
+
+    assert sp.isspmatrix_csr(anndata_obj.layers[layer])
+
+    anndata_obj.write_h5ad(output_path)
+
+    print(f"Written: {output_path}")
