@@ -1,0 +1,33 @@
+[project]
+name = "scanpy-sci-universe-04022026"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "adjusttext>=1.4.0",
+    "diffxpy>=0.7.4",
+    "jupyter>=1.1.1",
+    "marimo>=0.23.10",
+    "memory-profiler>=0.61.0",
+    "pandas>=3.0.3",
+    "papermill>=2.7.0",
+    "pyarrow>=23.0.1",
+    "pyclustree>=0.4.1",
+    "pymast",
+    "pyscdblfinder>=0.1.0",
+    "quarto>=0.1.0",
+    "quarto-cli>=1.10.18",
+    "scanpy>=1.12",
+    "scvi-tools[cuda,optional,tutorials]>=0.20.3",
+    "sparse>=0.18.0",
+]
+
+[tool.uv]
+override-dependencies = [
+    "anndata==0.12.16",
+    "pandas>=3.0.3"
+]
+
+[tool.uv.sources]
+pymast = { git = "https://github.com/tbrunetti/pyMAST.git" }
