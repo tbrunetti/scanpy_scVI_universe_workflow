@@ -1,4 +1,3 @@
-from triton.language import cat
 from path_config import PathConfig
 from zipfile import Path
 from typing import Iterable
@@ -91,11 +90,11 @@ def generate_h5ad(filtered_matrix_files:Path, platform:str, convert_ensembl:bool
           anndata_obj_collapsed.obs_names = anndata_obj.obs[cell_barcode_col]
           anndata_obj_collapsed.obs.index.name = None
 
-          # since on= is not specified as a parameter, it matches the dataframe based on row index; 
-          # # note the bc_wells, sample, species, gene_count, tscp_count, mread_count, bc1_well, bc2_well, bc3_well metadata comes from Parse, 
+          # since on= is not specified as a parameter, it matches the dataframe based on row index;
+          # # note the bc_wells, sample, species, gene_count, tscp_count, mread_count, bc1_well, bc2_well, bc3_well metadata comes from Parse,
           # so may be incaccurate for gene counts due to being based on Ensembl IDs rather than gene symbols
-          anndata_obj_collapsed.obs = anndata_obj_collapsed.obs.join(anndata_obj.obs, how = "left", sort = False) 
-          
+          anndata_obj_collapsed.obs = anndata_obj_collapsed.obs.join(anndata_obj.obs, how = "left", sort = False)
+
           # must cast all dtypes that are type str/categorical to type object, because anndata doesn't support arrow types yet and string/str/category come from new pandas arrow types
           #for col in anndata_obj_collapsed.obs.columns:
           #     if anndata_obj_collapsed.obs[col].dtype == 'str' or str(anndata_obj_collapsed.obs[col].dtype) == 'string' or anndata_obj_collapsed.obs[col].dtype == 'category':
@@ -109,7 +108,7 @@ def generate_h5ad(filtered_matrix_files:Path, platform:str, convert_ensembl:bool
 
           # read in gene and cell metadata
           gene_metadata = pandas.read_csv(filepath_or_buffer= os.path.join(filtered_matrix_files, "all_genes.csv.gz"),
-                                compression="gzip", 
+                                compression="gzip",
                                 engine="pyarrow") #pyarrow is more memory efficient for large csv files, although parquet may be even better and c engine is very fast but may be less memory efficient than pyarrow
 
           cell_metadata = pandas.read_csv(filepath_or_buffer= os.path.join(filtered_matrix_files, "cell_metadata.csv.gz"),
@@ -125,25 +124,25 @@ def generate_h5ad(filtered_matrix_files:Path, platform:str, convert_ensembl:bool
 
           logging.info("Saving unfiltered Ensembl anndata object to disk.")
           # file type is inferred from filename extension
-          anndata_obj.write(filename = paths_config.original_h5ad, 
+          anndata_obj.write(filename = paths_config.original_h5ad,
                        convert_strings_to_categoricals = True,
                        compression = "gzip")
-          
+
 
           if convert_ensembl:
-               anndata_obj = ensembl_to_symbol_pddense(anndata_obj = anndata_obj, 
-                                                       gene_symbol_col = "gene_name", 
+               anndata_obj = ensembl_to_symbol_pddense(anndata_obj = anndata_obj,
+                                                       gene_symbol_col = "gene_name",
                                                        cell_barcode_col = "bc_wells")
-               
-               anndata_obj.write(filename = paths_config.unfiltered_gene_symbol_h5ad, 
+
+               anndata_obj.write(filename = paths_config.unfiltered_gene_symbol_h5ad,
                                              convert_strings_to_categoricals = True,
                                              compression = "gzip")
-          
+
           # can remove large pandas dfs to save memory since now contained within anndata object
           del gene_metadata
           del cell_metadata
           gc.collect()
-          
+
           return anndata_obj
 
 
@@ -195,10 +194,10 @@ def ensembl_to_symbol_scipy(anndata_obj:anndata.AnnData, gene_symbol_col: str, c
      anndata_obj_collapsed.obs.index.name = None # don't name the index/rowname
      anndata_obj_collapsed.obs_names_make_unique()
 
-     # since on= is not specified as a parameter, it matches the dataframe based on row index; 
-     # # note the bc_wells, sample, species, gene_count, tscp_count, mread_count, bc1_well, bc2_well, bc3_well metadata comes from Parse, 
+     # since on= is not specified as a parameter, it matches the dataframe based on row index;
+     # # note the bc_wells, sample, species, gene_count, tscp_count, mread_count, bc1_well, bc2_well, bc3_well metadata comes from Parse,
      # so may be incaccurate for gene counts due to being based on Ensembl IDs rather than gene symbols
-     anndata_obj_collapsed.obs = anndata_obj_collapsed.obs.join(anndata_obj.obs, how = "left", sort = False) 
+     anndata_obj_collapsed.obs = anndata_obj_collapsed.obs.join(anndata_obj.obs, how = "left", sort = False)
 
      return anndata_obj_collapsed
 
@@ -226,10 +225,10 @@ def ensembl_to_symbol_pdsparse(anndata_obj:anndata.AnnData, gene_symbol_col: str
     # convert to anndata
     anndata_obj_collapsed = anndata.AnnData(sparse_pd_df)
 
-    # since on= is not specified as a parameter, it matches the dataframe based on row index; 
-    # # note the bc_wells, sample, species, gene_count, tscp_count, mread_count, bc1_well, bc2_well, bc3_well metadata comes from Parse, 
+    # since on= is not specified as a parameter, it matches the dataframe based on row index;
+    # # note the bc_wells, sample, species, gene_count, tscp_count, mread_count, bc1_well, bc2_well, bc3_well metadata comes from Parse,
     # so may be incaccurate for gene counts due to being based on Ensembl IDs rather than gene symbols
-    anndata_obj_collapsed.obs = anndata_obj_collapsed.obs.join(anndata_obj.obs, how = "left", sort = False) 
+    anndata_obj_collapsed.obs = anndata_obj_collapsed.obs.join(anndata_obj.obs, how = "left", sort = False)
 
     # make sure the index doesn't have a name or it causes problems with object formatting and saving the object
     anndata_obj.obs.index.name = None
@@ -246,8 +245,8 @@ def add_qcmetrics_and_metadata(anndata_obj:AnnData, sample_name:str, mito_regex:
 
     # add sample_name based on user input to metadata
     anndata_obj.obs["sample_name"] = sample_name
-     
-    # by running this, you wil get a list of boolean indicating if the condition is met in the same order as myAnnDataObj.var_names.  
+
+    # by running this, you wil get a list of boolean indicating if the condition is met in the same order as myAnnDataObj.var_names.
     # Recall, this contains an array of genes names
     # args.mito_regex
     anndata_obj.var_names.str.startswith(mito_regex).sum() # count the number of true instances
@@ -264,7 +263,7 @@ def add_qcmetrics_and_metadata(anndata_obj:AnnData, sample_name:str, mito_regex:
 
 
 
-    # by running this, you wil get a list of boolean indicating if the condition is met in the same order as myAnnDataObj.var_names.  
+    # by running this, you wil get a list of boolean indicating if the condition is met in the same order as myAnnDataObj.var_names.
     # Recall, this contains an array of genes names
     # args.ribo_regex
     anndata_obj.var_names.str.startswith(tuple(ribo_regex)).sum() # count the number of true instances
@@ -288,11 +287,11 @@ def add_qcmetrics_and_metadata(anndata_obj:AnnData, sample_name:str, mito_regex:
     # estimate doublets - not yet removed
     logging.info("Predicting singlets vs doublets in the dataset.")
     scdblfinder_obj = pyscdblfinder.ScDblFinder(anndata_obj, random_state=seed) # automatically addess class and score columns to the anndata_obj that is passed into the function
-    scdblfinder_obj.run(dbr=doublet_rate) 
+    scdblfinder_obj.run(dbr=doublet_rate)
     # save scDblFinder object as pickled file
     with open(paths_config.scdblfinder_pickle, "wb") as f:
         pickle.dump(scdblfinder_obj, f)
-     
+
     try:
         analysis_metadata['predicted_singlets'] = scdblfinder_obj.adata.obs["scDblFinder_class"].value_counts()["singlet"]
     except KeyError:
@@ -304,7 +303,7 @@ def add_qcmetrics_and_metadata(anndata_obj:AnnData, sample_name:str, mito_regex:
     except KeyError:
         logging.warning("No doublets detected in the data set.  This is unusual and you may want to take a deeper dive into your input data or double rate parameter.")
         analysis_metadata['predicted_doublets'] = 0
-     
+
     # if users has metadata parameter populated, add all metadata listed to annData cell level metadata
     if add_metadata != None:
         logging.info("Adding user provided cell level metadata to the .obs data slot of anndata object.")
@@ -316,11 +315,11 @@ def add_qcmetrics_and_metadata(anndata_obj:AnnData, sample_name:str, mito_regex:
     anndata_obj.write(filename = paths_config.unfiltered_gene_symbol_h5ad,
             convert_strings_to_categoricals = True,
             compression = "gzip")
-     
+
      # save dictionary of data generated from functions
     with open(paths_config.analysis_metadata_pickle, "wb") as f:
         pickle.dump(analysis_metadata, f)
-    
+
     # scdblfinder object is already saved as a pickled object so can remove to save memory
     del scdblfinder_obj
     gc.collect()
@@ -333,7 +332,7 @@ def add_qcmetrics_and_metadata(anndata_obj:AnnData, sample_name:str, mito_regex:
 def cell_filtering(anndata_obj:AnnData, remove_doublets:bool, analysis_metadata:dict, paths_config:PathConfig, min_counts:int | None = None, min_genes:int | None = None, max_counts:int | None = None, max_genes:int | None = None, max_mito:float| None = None) -> tuple(AnnData, dict):
     logging.info("Cell level filtering")
 
-    # store the number of cells before and after filtering in env_vars 
+    # store the number of cells before and after filtering in env_vars
     analysis_metadata["total_cells_prefilter"] = len(anndata_obj.obs.index)
     analysis_metadata["total_genes_prefilter"] = len(anndata_obj.var.index)
 
@@ -345,23 +344,23 @@ def cell_filtering(anndata_obj:AnnData, remove_doublets:bool, analysis_metadata:
         scanpy.pp.filter_cells(anndata_obj, max_counts=max_counts, inplace = True)
     if max_genes != None:
         scanpy.pp.filter_cells(anndata_obj, max_genes=max_genes, inplace = True)
-     
+
     # Keep cells that have < mito_contam percent
     anndata_obj = anndata_obj[anndata_obj.obs['pct_counts_is_mito'] < max_mito, :]
 
     if remove_doublets == True:
         anndata_obj = anndata_obj[anndata_obj.obs['scDblFinder_class'] == "singlet", :]
-     
-    # store the number of cells after filtering in env_vars 
+
+    # store the number of cells after filtering in env_vars
     analysis_metadata["total_cells_remaining_postfilter"] = len(anndata_obj.obs.index)
     analysis_metadata["total_genes_remaining_postfilter"] = len(anndata_obj.var.index)
 
-     
+
     # save h5ad; file type is inferred from filename extension
     anndata_obj.write(filename = paths_config.filtered_h5ad,
             convert_strings_to_categoricals = True,
             compression = "gzip")
-     
+
     # save metrics generated from function as pickled file
     with open(paths_config.analysis_metadata_pickle, "wb") as f:
         pickle.dump(analysis_metadata, f)
@@ -390,41 +389,41 @@ def normalize_and_transform(anndata_obj:AnnData, paths_config = PathConfig, size
     anndata_obj.write(filename = paths_config.filtered_h5ad,
             convert_strings_to_categoricals = True,
             compression = "gzip")
-     
+
     return anndata_obj
-     
+
 @profile
 def calculate_cell_cycle(anndata_obj:AnnData, s_genes:Iterable[str], g2m_genes:Iterable[str], analysis_metadata:dict, paths_config:PathConfig) -> AnnData:
     scanpy.tl.score_genes_cell_cycle(anndata_obj, s_genes=s_genes, g2m_genes=g2m_genes)
     analysis_metadata["total_S_phase_cells"] = int((anndata_obj.obs["phase"] == "S").sum())
     analysis_metadata["total_G1_phase_cells"] = int((anndata_obj.obs["phase"] == "G1").sum())
     analysis_metadata["total_G2M_phase_cells"] = int((anndata_obj.obs["phase"] == "G2M").sum())
-    
+
     # save metrics generated from function as pickled file
     with open(paths_config.analysis_metadata_pickle, "wb") as f:
         pickle.dump(analysis_metadata, f)
     return anndata_obj, analysis_metadata
 
 
-@profile     
-def identify_and_transform_hvgs(anndata_obj:AnnData, analysis_metadata:dict, paths_config:PathConfig, n_hvgs:int, hvg_ignore:str, vars_to_regress:Iterable[str], threads:int) -> tuple(AnnData, dict): 
+@profile
+def identify_and_transform_hvgs(anndata_obj:AnnData, analysis_metadata:dict, paths_config:PathConfig, n_hvgs:int, hvg_ignore:str, vars_to_regress:Iterable[str], threads:int) -> tuple(AnnData, dict):
     logging.info("Scale data, regress covariates, and identify highly variable genes")
 
     '''
     FROM SCANPY DOCS FOR: scanpy.pp.highly_variable_genes()
-    The following may help when comparing to Seurat’s naming: If batch_key=None and flavor='seurat', 
-    this mimics Seurat’s FindVariableFeatures(…, method='mean.var.plot'). If batch_key=None and 
-    flavor='seurat_v3'/flavor='seurat_v3_paper', this mimics Seurat’s FindVariableFeatures(..., method='vst'). 
+    The following may help when comparing to Seurat’s naming: If batch_key=None and flavor='seurat',
+    this mimics Seurat’s FindVariableFeatures(…, method='mean.var.plot'). If batch_key=None and
+    flavor='seurat_v3'/flavor='seurat_v3_paper', this mimics Seurat’s FindVariableFeatures(..., method='vst').
     If batch_key is not None and flavor='seurat_v3_paper', this mimics Seurat’s SelectIntegrationFeatures.
     https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.highly_variable_genes.html#scanpy.pp.highly_variable_genes
-    '''   
+    '''
     # hvgs are returned in .var
     scanpy.pp.highly_variable_genes(anndata_obj, n_top_genes=n_hvgs, flavor = "seurat", filter_unexpressed_genes = False, batch_key=None, inplace = True) # note, chose to stick to always Seurat method to reduce complexity; other options are seurat_v3 which we should avoid and cell_ranger; also batch is always None here because it is for independent samples so there will not be a batch
     anndata_obj.layers["normalized"] = anndata_obj.X.copy() # keep a copy of the just the normalized transformed data before regression and scaling (X is the active layer)
     scanpy.pp.regress_out(anndata_obj, keys = vars_to_regress, n_jobs = threads)
     scanpy.pp.scale(anndata_obj, max_value=None, zero_center = True)
 
-  
+
     # for HVG, set genes to false that are part of B cell clonotypes
     # gets hvg list of top x most variable genes and has
     genes_to_ignore_for_clustering = anndata_obj.var[anndata_obj.var.index.str.contains(hvg_ignore, regex=True)].index.tolist() #list of all genes that should be removed from HVG
@@ -437,7 +436,7 @@ def identify_and_transform_hvgs(anndata_obj:AnnData, analysis_metadata:dict, pat
 
 
     # plot HVGs and save in qc_images subdirectory
-    pretty_highly_variable_genes(anndata_obj = anndata_obj, 
+    pretty_highly_variable_genes(anndata_obj = anndata_obj,
             genes_to_ignore_for_clustering = genes_to_ignore_for_clustering,
             paths_config = paths_config,
             n_top_genes = 10)
@@ -449,25 +448,25 @@ def identify_and_transform_hvgs(anndata_obj:AnnData, analysis_metadata:dict, pat
     anndata_obj.write(filename = paths_config.filtered_h5ad,
             convert_strings_to_categoricals = True,
             compression = "gzip")
-     
+
     # save metrics generated from function as pickled file
     with open(paths_config.analysis_metadata_pickle, "wb") as f:
         pickle.dump(analysis_metadata, f)
-     
+
     return anndata_obj, analysis_metadata
 
 
-@profile  
+@profile
 def pca(anndata_obj:AnnData, analysis_metadata:dict, pca_var_change:float, seed:int, paths_config = PathConfig) -> tuple(AnnData, dict):
     logging.info("Running PCA")
 
     '''
     FROM SCANPY DOCS FOR: scanpy.pp.pca()
-    when svd_solver = auto, choose automatically depending on the size of the problem: Will use 'full' 
+    when svd_solver = auto, choose automatically depending on the size of the problem: Will use 'full'
     for small shapes and 'randomized' for large shapes.
-    the embedding is stored as obsm['X_pca'] (PCA representation data), 
-    the loadings as varm['PCs'] (gene loadings), and the the parameters in 
-    uns['pca']['variance_ratio'] (ratio of variance explained), 
+    the embedding is stored as obsm['X_pca'] (PCA representation data),
+    the loadings as varm['PCs'] (gene loadings), and the the parameters in
+    uns['pca']['variance_ratio'] (ratio of variance explained),
     uns['pca']['variance'] (explained variance; equalivalent to eigenvalues of the covariance matrix)
     https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.pca.html#scanpy.pp.pca
     '''
@@ -483,9 +482,9 @@ def pca(anndata_obj:AnnData, analysis_metadata:dict, pca_var_change:float, seed:
     # returns the first PC where the change in varinces is less than thte change specified by user
     '''
     np.argmax() on a boolean array is a common trick to find the first index where a condition is True, without writing an explicit loop.
-    Why it works: change_in_var < 0.1 produces a boolean array ([False, False, True, True, ...]). Python treats True as 1 and False as 0. 
-    argmax() returns the index of the first occurrence of the maximum value in an array — and since True (1) is the max possible value in 
-    a boolean array, argmax() finds the first True, i.e. the first index satisfying your condition. It's a fast, vectorized way to do 
+    Why it works: change_in_var < 0.1 produces a boolean array ([False, False, True, True, ...]). Python treats True as 1 and False as 0.
+    argmax() returns the index of the first occurrence of the maximum value in an array — and since True (1) is the max possible value in
+    a boolean array, argmax() finds the first True, i.e. the first index satisfying your condition. It's a fast, vectorized way to do
     "find first index where X" without a Python-level loop.
     '''
     idx = numpy.argmax(change_in_var < pca_var_change)  # first True index (note our numpy array is naturally sorted), or 0 if none are True
@@ -508,14 +507,14 @@ def pca(anndata_obj:AnnData, analysis_metadata:dict, pca_var_change:float, seed:
     ax.text(analysis_metadata["pcs_to_use"], 0.97, f"PC={analysis_metadata["pcs_to_use"]}", rotation=90, va="top", ha="right", transform=ax.get_xaxis_transform())
     plt.gcf().savefig(paths_config.qc_dir / "pca_elbow_plot_of_hvgs.png", bbox_inches = "tight")
     plt.close()
-    
+
     # plot pc loadings - top hvgs driving each PC
     scanpy.pl.pca_loadings(anndata_obj, components = '1,2,3,4,5,6,7,8,9,10', include_lowest = True, show = False) # include_lowest means to show the features that have the highest and lowest loadings
     plt.gcf().savefig(paths_config.qc_dir / "pca_gene_loadings_of_hvgs.png", bbox_inches = "tight")
     plt.close()
 
-    pretty_pca_loadings(anndata_obj = anndata_obj, 
-            total_pcs_to_summarize = 10, 
+    pretty_pca_loadings(anndata_obj = anndata_obj,
+            total_pcs_to_summarize = 10,
             n_genes_to_plot_per_direction = 5,
             paths_config = paths_config)
 
@@ -525,11 +524,11 @@ def pca(anndata_obj:AnnData, analysis_metadata:dict, pca_var_change:float, seed:
     anndata_obj.write(filename = paths_config.filtered_h5ad,
             convert_strings_to_categoricals = True,
             compression = "gzip")
-     
+
     # save metrics generated from function as pickled file
     with open(paths_config.analysis_metadata_pickle, "wb") as f:
         pickle.dump(analysis_metadata, f)
-     
+
     return anndata_obj, analysis_metadata
 
 
@@ -539,24 +538,24 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
 
     '''
     FROM SCANPY DOCS FOR: scanpy.pp.neighbors()
-    If not specified, the neighbors data is stored in .uns['neighbors'], distances and connectivities are stored in .obsp['distances'] and 
-    .obsp['connectivities'] respectively. If specified, the neighbors data is added to .uns[key_added], distances are stored in 
+    If not specified, the neighbors data is stored in .uns['neighbors'], distances and connectivities are stored in .obsp['distances'] and
+    .obsp['connectivities'] respectively. If specified, the neighbors data is added to .uns[key_added], distances are stored in
     .obsp[f'{key_added}_distances'] and connectivities in .obsp[f'{key_added}_connectivities'].
     https://scanpy.readthedocs.io/en/stable/api/generated/scanpy.pp.neighbors.html#scanpy.pp.neighbors
     '''
     scanpy.pp.neighbors(anndata_obj, n_neighbors=n_neighbors, n_pcs = n_pcs, knn=True, method="umap", metric = dist_metric, random_state = seed)
-     
+
     # calculate umap embeddings
     # n_components is the number of dimisions to plot umap embedding into; 2 is typical, and 3 is if you want a 3D
     # umap; this is not in reference to the number of PC compoenents to use, which is used to determine the neighborhood connectivity
     # method: umap or rapids (rapids for GPU accelerated and umap for CPU/non-accelerated)
     # min_dist defaults to 0.5
-    # If not specified, the embedding is stored as obsm['X_umap'] and the the parameters in uns['umap']. If specified, the embedding is stored 
+    # If not specified, the embedding is stored as obsm['X_umap'] and the the parameters in uns['umap']. If specified, the embedding is stored
     # as obsm[key_added] and the the parameters in uns[key_added].
     scanpy.tl.umap(anndata_obj, n_components = 2, random_state = seed, method = 'umap', min_dist = 0.5, key_added = "initial_umap")
 
     '''
-     scanpy recommends using the leiden algorithm for clustering using scanpy.tl.leiden(). Clustering is based upon the previously calculated neighborhood graphs 
+     scanpy recommends using the leiden algorithm for clustering using scanpy.tl.leiden(). Clustering is based upon the previously calculated neighborhood graphs
      on the higher dimensional space.  If you prefer to use the louvain algorithm similar to what Seurat implements, you can use scanpy.tl.louvain().
 
      The options I haev set for the Leiden algorithm for identifying cluster boundries are the following:
@@ -568,15 +567,15 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
      *random_state: is essentially a seed since all of the clustering is unsupervised, so can be set to an integer for keeping results reproducible between runs
      *use_weights: if True, edge weights from the graph are used in the computation (placing more emphasis on stronger edges).
      *neighbors:_key by default this is to None, which means the neighbors calcaulated before are stored in the default location of .obsp["connectivities"]. This shouldn't be changed unless you have multiple neighbor graphs calculated or you changed the name of the key when running the neighbors command above.
-     '''     
+     '''
     # for loop through a few different resolutions to test a few options and then refine from here if needed
     for res in resolutions:
         print(res)
         scanpy.tl.leiden(anndata_obj, key_added=f"leiden_res_{res:.2f}", resolution=res, flavor="igraph", n_iterations= -1, random_state = seed, use_weights = True, neighbors_key = None)
-     
+
 
      #clustree resolution check
-    fig = pyclustree.clustree(anndata_obj, 
+    fig = pyclustree.clustree(anndata_obj,
         [f"leiden_res_{res:.2f}" for res in resolutions],
         title="Clustree",
         x_spacing = 7, # space between nodes along the x-axis; default is 2.5
@@ -626,7 +625,7 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
             )
         fig.set_size_inches(15, 12)
         fig.set_dpi(100)
-        
+
         # Increase text size
         for ax in fig.axes:
             for text in ax.texts:
@@ -636,7 +635,7 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
             dpi=300,
             bbox_inches="tight"
             )
-    
+
      # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
      # but there will be added PCA calculations and data to obsm, varm, and uns
     anndata_obj.write(filename = paths_config.filtered_h5ad,
@@ -652,9 +651,9 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
     for cluster_res in all_resolutions:
         resolution_dir = paths_config.resolution_dir(cluster_res)
         resolution_dir.mkdir(parents=True, exist_ok=True)
-        plot_reductions(anndata_obj = anndata_obj , 
-                            reduction_name = "initial_umap", 
-                            layer = "normalized", 
+        plot_reductions(anndata_obj = anndata_obj ,
+                            reduction_name = "initial_umap",
+                            layer = "normalized",
                             ncol_layout = 1,   # should always be 1 if clsuter label = True
                             continuous_col = "magma",  # for continuous values
                             categorical_col = "Set3", # for categorical values
@@ -663,7 +662,7 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
                             cluster_label = True, # labeling of clusters should be reserved for categorical variables only
                             file_savename = f"{cluster_res}_initial_umap",
                             save_path = resolution_dir)
-        
+
         # plot the normalized expression of the core genes on a violin plot
         for genes in addl_genes:
             plot_violin(anndata_obj = anndata_obj,
@@ -675,15 +674,15 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
                         )
 
     # these plots are not at the per resolution level
-    plot_reductions(anndata_obj = anndata_obj , 
-                        reduction_name = "initial_umap", 
-                        layer = "normalized", 
-                        ncol_layout = 3, 
+    plot_reductions(anndata_obj = anndata_obj ,
+                        reduction_name = "initial_umap",
+                        layer = "normalized",
+                        ncol_layout = 3,
                         continuous_col = "magma",  # for continuous values
                         categorical_col = "Set3", # for categorical values
                         marker = "o",
                         groupby_col = addl_genes, # core_genes_to_plot
-                        cluster_label = False, 
+                        cluster_label = False,
                         file_savename = "core_genes_norm_expression_umap",
                         save_path = paths_config.cluster_dir)
 
@@ -693,11 +692,11 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
 def final_qc_images(anndata_obj:AnnData, reduction:str, layer:str, paths_config:PathConfig, continuous_color_pal:str="magma", categorical_color_pal:str="Set3") -> None:
     logging.info("Generating final images for plotting QC metadata and cell cycle phase on different embeddings")
 
-    # final set of QC checks on umap embeddings and pca  
-    plot_reductions(anndata_obj = anndata_obj, 
-                reduction_name = reduction, 
-                layer = layer, 
-                ncol_layout = 2,  
+    # final set of QC checks on umap embeddings and pca
+    plot_reductions(anndata_obj = anndata_obj,
+                reduction_name = reduction,
+                layer = layer,
+                ncol_layout = 2,
                 continuous_col = continuous_color_pal,  # for continuous values: magma
                 categorical_col = categorical_color_pal,
                 marker = "o",
@@ -705,11 +704,11 @@ def final_qc_images(anndata_obj:AnnData, reduction:str, layer:str, paths_config:
                 cluster_label = False,
                 file_savename = f"final_qc_{reduction}",
                 save_path = paths_config.qc_dir)
-    
-    plot_reductions(anndata_obj = anndata_obj, 
-                reduction_name = reduction, 
-                layer = layer, 
-                ncol_layout = 1,  
+
+    plot_reductions(anndata_obj = anndata_obj,
+                reduction_name = reduction,
+                layer = layer,
+                ncol_layout = 1,
                 continuous_col = continuous_color_pal,
                 categorical_col = categorical_color_pal,
                 marker = "o",
@@ -717,7 +716,7 @@ def final_qc_images(anndata_obj:AnnData, reduction:str, layer:str, paths_config:
                 cluster_label = True,
                 file_savename = f"phase_{reduction}",
                 save_path = paths_config.qc_dir)
-    
+
 
 
 '''
