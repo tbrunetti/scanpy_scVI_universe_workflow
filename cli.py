@@ -90,7 +90,9 @@ def add_per_sample_args(parser: argparse.ArgumentParser) -> None:
 # add all arguments currently used by the mulit-sample workflow
 def add_multi_sample_args(parser: argparse.ArgumentParser) -> None:
     add_project_args(parser)
-
+    add_multi_sample_specific_args(parser)
+    add_normalization_args(parser)
+    add_clustering_args(parser)
 
 
 def add_resume_args(parser: argparse.ArgumentParser) -> None:
@@ -114,8 +116,10 @@ def build_parser() -> argparse.ArgumentParser:
     new_project = subparsers.add_parser("newProject", help="Start a new analysis project")
     workflow_subparsers = new_project.add_subparsers(dest="workflow_type", required=True)
     per_sample = workflow_subparsers.add_parser("per_sample", help="Start a new per-sample preprocessing project.")
-    
     add_per_sample_args(per_sample)
+
+    multi_sample = workflow_subparsers.add_parser("multi_sample", help="Start a new multi-sample preprocessing project.")
+    add_multi_sample_args(multi_sample)
 
     # ---------------------------------------------------------------
     # Resume existing project
