@@ -212,6 +212,22 @@ class MultiSampleConfig:
     anndata_file: Path
     anndata_paths: tuple[Path, ...]
 
+    # Normalization / transformation
+    size_factor: int | None
+    save_memory: bool
+    data_chunk_size: int | None
+    n_hvgs: int
+    regress_vars: tuple[str, ...]
+    hvg_ignore: str
+
+    # Dimensionality reduction / clustering
+    pca_var_change: float
+    neighbors: int
+    resolutions: tuple[float, ...]
+    dist_metric: str
+    top_genes_per_cluster_to_plot: int
+    core_genes_to_plot: tuple[str, ...]
+
     @classmethod
     def from_namespace(cls, ns: Namespace) -> Self:
         """Build the multi-sample configuration from the multi-sample CLI namespace."""
@@ -264,6 +280,9 @@ class MultiSampleConfig:
 
         data["anndata_file"] = anndata_file
         data["anndata_paths"] = anndata_paths
+        data["regress_vars"] = tuple(data["regress_vars"])
+        data["resolutions"] = tuple(data["resolutions"])
+        data["core_genes_to_plot"] = tuple(data["core_genes_to_plot"])
 
         return cls(**data)
 
@@ -402,8 +421,6 @@ class PipelineConfig:
         else:
             raise NotImplementedError(
                 f"Workflow '{workflow_type.value}' is not implemented yet.")
-
-        workflow = PerSampleConfig.from_namespace(ns)
 
         return cls(
             workflow_type=workflow_type,
