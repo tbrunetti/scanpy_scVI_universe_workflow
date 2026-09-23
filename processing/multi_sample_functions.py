@@ -1,10 +1,13 @@
+from path_config import PathConfig
 from pathlib import Path
 import anndata
 import scanpy
 import scipy.sparse
+from typing import Iterable
+from memory_profiler import profile
 
 @profile
-def merge_h5ads_for_joint_preprocessing(h5ad_paths:Iterable, layer:str, barcode_prefix_column:str) -> None:
+def merge_h5ads_for_joint_preprocessing(h5ad_paths:Iterable[Path], layer:str, barcode_prefix_column:str, h5ad_save_name:Path) -> AnnData:
     """
     Create a cohort-level AnnData containing only:
 
@@ -54,8 +57,8 @@ def merge_h5ads_for_joint_preprocessing(h5ad_paths:Iterable, layer:str, barcode_
             raw_counts = raw_counts.to_memory()
 
         # Ensure CSR. - to save memory by forcing matrix to be sparse
-        if not sp.isspmatrix_csr(raw_counts):
-            raw_counts = sp.csr_matrix(raw_counts)
+        if not scipy.sparse.isspmatrix_csr(raw_counts):
+            raw_counts = scipy.sparse.csr_matrix(raw_counts)
 
         # Copy only the metadata from cell and genes
         obs = source.obs.copy()
@@ -84,8 +87,8 @@ def merge_h5ads_for_joint_preprocessing(h5ad_paths:Iterable, layer:str, barcode_
     if not merged_anndata_obj.obs_names.is_unique:
         raise ValueError(f"Merged AnnData contains duplicated cell barcodes after prepending {barcode_prefix_column} values.")
 
-    merged_anndata_obj.write(filename = paths_config.unfiltered_gene_symbol_h5ad,
+    merged_anndata_obj.write(filename = h5ad_save_name,
                     convert_strings_to_categoricals = True,
                     compression = "gzip")
     
-    return merged
+    return merged_anndata_obj
