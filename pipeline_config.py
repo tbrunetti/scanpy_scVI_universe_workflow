@@ -234,7 +234,11 @@ class MultiSampleConfig:
         raw = vars(ns)
         config_fields = {field.name for field in fields(cls)}
 
-        missing_fields = config_fields - raw.keys()
+        # anndata_paths is NOT supplied by argparse.
+        # It is derived below by reading anndata_file.
+        cli_fields = config_fields - {"anndata_paths"}
+        
+        missing_fields = cli_fields - raw.keys()
         if missing_fields:
             raise ValueError(
                 "The multi-sample argparse Namespace is missing required "
@@ -242,7 +246,7 @@ class MultiSampleConfig:
                 + ", ".join(sorted(missing_fields))
             )
 
-        data = {name: raw[name] for name in config_fields}
+        data = {name: raw[name] for name in cli_fields}
 
         # Path to the text file containing one H5AD path per line.
         anndata_file = _as_path(data["anndata_file"])
