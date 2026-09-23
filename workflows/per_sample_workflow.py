@@ -1,4 +1,3 @@
-from initial_scRNAseq_analysis_per_sample import neighbors_umap_clust
 import path_config
 import anndata
 from cli import parse_args
@@ -41,7 +40,10 @@ def run_pipeline():
     # --------------------------------------------------
     # 4. Run pipeline steps
     # --------------------------------------------------
-
+    
+    # first time project level metadata is initiated
+    analysis_metadata = {}
+    
     # STEP0: create an unfiltered anndata object
     anndata_obj = generate_h5ad(filtered_matrix_files = config.filtered_feature_bc_matrix,
                 platform = config.platform, 
@@ -56,6 +58,7 @@ def run_pipeline():
                 add_metadata = config.metadata, 
                 doublet_rate = config.dbl_rate,
                 seed = config.seed,
+                analysis_metadata = analysis_metadata,
                 paths_config = paths)
     
     qc_figures(anndata_obj = anndata_obj, 
@@ -92,7 +95,7 @@ def run_pipeline():
                 size_factor = config.size_factor,
                 save_memory = config.save_memory,
                 data_chunk_size = config.data_chunk_size,
-                paths_config = paths)
+                h5ad_save_name = paths.filtered_h5ad)
 
     # STEP4: calculate and infer cell cycle
     anndata_obj, analysis_metadata = calculate_cell_cycle(anndata_obj = anndata_obj,
@@ -108,6 +111,7 @@ def run_pipeline():
                 hvg_ignore = config.hvg_ignore,
                 threads = config.threads,
                 analysis_metadata = analysis_metadata,
+                h5ad_save_name = paths.filtered_h5ad,
                 paths_config = paths)
 
     #STEP6: pca
@@ -115,6 +119,7 @@ def run_pipeline():
                 pca_var_change = config.pca_var_change,
                 seed = config.seed,
                 analysis_metadata = analysis_metadata,
+                h5ad_save_name = paths.filtered_h5ad,
                 paths_config = paths)
     
     #STEP7: find neighbors, generate umap, and define cluster partitions
@@ -125,6 +130,7 @@ def run_pipeline():
                 seed = config.seed,
                 resolutions = config.resolutions,
                 addl_genes = config.core_genes_to_plot,
+                h5ad_save_name = paths.filtered_h5ad,
                 paths_config = paths)
 
     #STEP8: genearte final set of QC metic images on different embeddings
