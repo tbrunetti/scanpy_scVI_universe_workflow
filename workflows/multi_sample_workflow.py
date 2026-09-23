@@ -14,8 +14,6 @@ def run_pipeline():
     config = parse_args()
 
     # config is now a PipelineConfig object
-    print(f"Sample:     {config.sample_name}")
-    print(f"Platform:   {config.platform}")
     print(f"Run date:   {config.run_date}")
     print(f"Working dir: {config.working_dir}")
 
@@ -41,23 +39,23 @@ def run_pipeline():
     # --------------------------------------------------
     # 4. Run pipeline steps
     # --------------------------------------------------
-    
+
     # first time project level metadata is initiated
     analysis_metadata = {}
-    
+
     # STEP0: create an unfiltered anndata object
-    merged_anndata_obj = merge_h5ads_for_joint_preprocessing(h5ad_paths = config.workflow.anndata_paths, 
-                layer = "counts", 
+    merged_anndata_obj = merge_h5ads_for_joint_preprocessing(h5ad_paths = config.workflow.anndata_paths,
+                layer = "counts",
                 barcode_prefix_column = "sample_name",
                 h5ad_save_name = paths.merged_h5ad)
-    
+
     # STEP1: normalize and transform data
     merged_anndata_obj = normalize_and_transform(anndata_obj = merged_anndata_obj,
                 size_factor = config.workflow.size_factor,
-                save_memory = config.worfkflow.save_memory,
+                save_memory = config.workflow.save_memory,
                 data_chunk_size = config.workflow.data_chunk_size,
                 h5ad_save_name = paths.merged_h5ad)
-    
+
     #STEP2: idenfity high variably genes to use for clustering
     merged_anndata_obj, analysis_metadata = identify_and_transform_hvgs(anndata_obj = merged_anndata_obj,
                 n_hvgs = config.workflow.n_hvgs,
@@ -75,7 +73,7 @@ def run_pipeline():
                 analysis_metadata = analysis_metadata,
                 h5ad_save_name = paths.merged_h5ad,
                 paths_config = paths)
-    
+
     #STEP4: find neighbors, generate umap, and define cluster partitions
     merged_anndata_obj = neighbors_umap_clust(anndata_obj = merged_anndata_obj,
                 n_neighbors = config.neighbors,
@@ -84,13 +82,14 @@ def run_pipeline():
                 seed = config.seed,
                 resolutions = config.resolutions,
                 addl_genes = config.core_genes_to_plot,
+                h5ad_save_name = paths.merged_h5ad,
                 paths_config = paths)
 
     #STEP5: genearte final set of QC metic images on different embeddings
     plot_embeddigs = ["X_pca", "merged_umap"]
     for embedding in plot_embeddigs:
-        final_qc_images(anndata_obj = merged_anndata_obj, 
-                    reduction = embedding, 
+        final_qc_images(anndata_obj = merged_anndata_obj,
+                    reduction = embedding,
                     layer = "normalized",
                     paths_config = paths)
 
