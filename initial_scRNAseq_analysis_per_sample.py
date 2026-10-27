@@ -1,7 +1,4 @@
-import scanpy
 from typing import Iterable
-from jsonschema.benchmarks.subcomponents import v
-from matplotlib.pylab import sca
 import sys
 import os
 import pathlib
@@ -919,98 +916,6 @@ def plot_reductions(anndata_obj:AnnData, env_vars:dict, reduction_name:str, laye
      '''
 
 
-@profile
-def one_vs_all_de(anndata_obj:AnnData, env_vars:dict, num_genes_to_plot:int, de_test:str, core_genes_to_plot:Iterable, min_pct:float, max_padj:float) -> tuple(AnnData, dict):
-     # obtain cluster-specific differentially expressed genes using Wilcoxon
-     pattern = re.compile(r"^leiden_res_[0-9]*")
-     all_resolutions = [x for x in anndata_obj.obs_keys() if pattern.search(x)]
-     
-     if de_test == "pyMAST":
-          for res in all_resolutions:
-               # obtrain cluster-specific differentially expressed genes using MAST
-               pymast.tl.rank_genes_groups(anndata_obj,
-                    groupby=res,          # obs column with group labels
-                    groups="all",              # test all grnum_genes_to_plotoups vs. rest
-                    reference="rest",
-                    layer="normalized",                # use adata.X (pass layer name for a specific layer)
-                    ebayes=True,               # empirical Bayes variance shrinkage
-                    method="bayesglm",         # "bayesglm" | "glm"
-                    n_jobs=-1,                 # parallelism (-1 = all cores)
-                    key_added='{}_rank_genes_groups'.format(res)
-                    #cdr_key = '{}_cdr'.format(res),
-                    #pts = True
-               )
-
-               # get df of the results of the MAST DE of 1 vs all for all clusters
-               # setting group=None means you want all clusters DE.  If you only want to see a specific
-               # cluster group, such as just cluster 0 results, you can set group = "0" or group = "1" to get 
-               # cluster ID 1 results for MAST    
-               de_df = scanpy.get.rank_genes_groups_df(anndata_obj, group=None, key='{}_rank_genes_groups'.format(res))
-               # keep only significant hits
-               de_df = de_df[de_df["pvals_adj"] < max_padj]
-               # to prevent rare clonotypes from being selected, also apply a minimum percent expressed per group
-               de_df = de_df[de_df["pct_nz_group"] > min_pct]
-
-               # top n genes by logfoldchanges within each cluster
-               topn_per_group = (de_df.groupby("group", sort=False, group_keys=False).apply(lambda x: x.nlargest(num_genes_to_plot, "logfoldchanges")))
-               genes_to_plot = topn_per_group["names"].tolist() + core_genes_to_plot
-
-               # plot mean expression
-               dp_mean_norm_expr = scanpy.pl.DotPlot(anndata_obj, 
-                                   groupby = res, 
-                                   var_names=genes_to_plot, 
-                                   layer="normalized", 
-                                   standard_scale=None, 
-                                   dendrogram=False)
-               dp_mean_norm_expr.legend(colorbar_title="Mean Gene Expression", size_title="Fraction Expressing (%)")
-               dp_mean_norm_expr.make_figure()
-               ax = dp_mean_norm_expr.ax_dict["mainplot_ax"]
-               ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
-               dp_mean_norm_expr.savefig("cluster_analysis/{}_mean_expr_dotplot.png".format(res), bbox_inches="tight")
-               
-               # plot z-scaled expression
-               dp_scaled_expr = scanpy.pl.DotPlot(anndata_obj, 
-                                   groupby = res, 
-                                   var_names=genes_to_plot, 
-                                   layer="normalized", 
-                                   standard_scale="var",
-                                   cmap = "RdBu_r",
-                                   vcenter = 0, 
-                                   var_group_rotation = 45,
-                                   dendrogram=False)
-               dp_scaled_expr.legend(colorbar_title="Z-scaled Expression", size_title="Fraction Expressing (%)")
-               dp_scaled_expr.make_figure()
-               ax = dp_scaled_expr.ax_dict["mainplot_ax"]
-               ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
-               dp_scaled_expr.savefig("cluster_analysis/{}_scaled_expr_dotplot.png".format(res), bbox_inches="tight")
-     
-     else:
-          for res in all_resolutions:
-               scanpy.tl.rank_genes_groups(anndata_obj, 
-                                        groupby=res, 
-                                        groups="all",              # test all grnum_genes_to_plotoups vs. rest
-                                        reference="rest",
-                                        layer="normalized", 
-                                        method = de_test,
-                                        pts = True,
-                                        key_added='{}_rank_genes_groups'.format(res),
-                                        cdr_key = '{}_cdr'.format(res)
-                                        )
-
-     env_vars["de_test"] = de_test
-     env_vars["min_pct_plot_filter"] = min_pct
-     env_vars["max_padj_plot_filter"] = max_padj
-
-     # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
-     # but there will be added PCA calculations and data to obsm, varm, and uns
-     anndata_obj.write(filename = os.path.join(env_vars["workingDir"], "h5ad_objects", "testing_save_filtered_gene_symbol_{}_{}.h5ad".format(env_vars["save_prefix"], env_vars["date"])),
-                       convert_strings_to_categoricals = True,
-                       compression = "gzip")
-     
-     with open(pathlib.Path("".join(["workspace_files/vars_and_params_", env_vars["save_prefix"], "_", env_vars["date"], ".pkl"])), "wb") as f:
-          pickle.dump(env_vars, f)
-
-     return anndata_obj, env_vars
 
 
 
