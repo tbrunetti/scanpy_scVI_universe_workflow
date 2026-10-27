@@ -239,10 +239,7 @@ def ensembl_to_symbol_pdsparse(anndata_obj:anndata.AnnData, gene_symbol_col: str
 
 
 @profile
-def add_qcmetrics_and_metadata(anndata_obj:AnnData, sample_name:str, mito_regex:str, ribo_regex:list, add_metadata:list, doublet_rate:float, seed:int, paths_config:PathConfig) -> tuple(AnnData, dict):
-    # first time project level metadata is initiated
-    analysis_metadata = {}
-
+def add_qcmetrics_and_metadata(anndata_obj:AnnData, sample_name:str, mito_regex:str, ribo_regex:list, add_metadata:list, doublet_rate:float, seed:int, analysis_metadata:dict, paths_config:PathConfig) -> tuple(AnnData, dict):
     # add sample_name based on user input to metadata
     anndata_obj.obs["sample_name"] = sample_name
 
@@ -376,7 +373,7 @@ def cell_filtering(anndata_obj:AnnData, remove_doublets:bool, analysis_metadata:
 # if save_memory is True, data_chunk_size is required and that roughly equates to the bumber of cells per batch to split the array for memory saving purposes
 # if save_memory is False then data_chunk_size is set to None as the parameter does not matter; full array is stored in memory
 @profile
-def normalize_and_transform(anndata_obj:AnnData, paths_config = PathConfig, size_factor: int | None = None, save_memory:bool = False, data_chunk_size:int|None = None) -> AnnData:
+def normalize_and_transform(anndata_obj:AnnData, h5ad_save_name:Path, size_factor: int | None = None, save_memory:bool = False, data_chunk_size:int|None = None) -> AnnData:
     logging.info("Normalization and transformation of counts")
 
     # save a copy of the raw counts to the counts layer (X is the active layer and when normalization is applied it applies to X)
@@ -386,7 +383,7 @@ def normalize_and_transform(anndata_obj:AnnData, paths_config = PathConfig, size
     scanpy.pp.log1p(anndata_obj, base = None, chunked = None, chunk_size = None, layer = None)
 
     # save h5ad; file type is inferred from filename extension
-    anndata_obj.write(filename = paths_config.filtered_h5ad,
+    anndata_obj.write(filename = h5ad_save_name,
             convert_strings_to_categoricals = True,
             compression = "gzip")
 
@@ -406,7 +403,7 @@ def calculate_cell_cycle(anndata_obj:AnnData, s_genes:Iterable[str], g2m_genes:I
 
 
 @profile
-def identify_and_transform_hvgs(anndata_obj:AnnData, analysis_metadata:dict, paths_config:PathConfig, n_hvgs:int, hvg_ignore:str, vars_to_regress:Iterable[str], threads:int) -> tuple(AnnData, dict):
+def identify_and_transform_hvgs(anndata_obj:AnnData, analysis_metadata:dict, h5ad_save_name:Path, paths_config:PathConfig, n_hvgs:int, hvg_ignore:str, vars_to_regress:Iterable[str], threads:int) -> tuple(AnnData, dict):
     logging.info("Scale data, regress covariates, and identify highly variable genes")
 
     '''
@@ -445,7 +442,7 @@ def identify_and_transform_hvgs(anndata_obj:AnnData, analysis_metadata:dict, pat
     # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
     #anndata_obj.layers["regressed_scaled"] = anndata_obj.X.toarray()
     # save h5ad; file type is inferred from filename extension
-    anndata_obj.write(filename = paths_config.filtered_h5ad,
+    anndata_obj.write(filename = h5ad_save_name,
             convert_strings_to_categoricals = True,
             compression = "gzip")
 
@@ -457,7 +454,7 @@ def identify_and_transform_hvgs(anndata_obj:AnnData, analysis_metadata:dict, pat
 
 
 @profile
-def pca(anndata_obj:AnnData, analysis_metadata:dict, pca_var_change:float, seed:int, paths_config = PathConfig) -> tuple(AnnData, dict):
+def pca(anndata_obj:AnnData, analysis_metadata:dict, pca_var_change:float, seed:int, h5ad_save_name:Path, paths_config:PathConfig) -> tuple(AnnData, dict):
     logging.info("Running PCA")
 
     '''
@@ -521,7 +518,7 @@ def pca(anndata_obj:AnnData, analysis_metadata:dict, pca_var_change:float, seed:
 
      # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
      # but there will be added PCA calculations and data to obsm, varm, and uns
-    anndata_obj.write(filename = paths_config.filtered_h5ad,
+    anndata_obj.write(filename = h5ad_save_name,
             convert_strings_to_categoricals = True,
             compression = "gzip")
 
@@ -533,7 +530,7 @@ def pca(anndata_obj:AnnData, analysis_metadata:dict, pca_var_change:float, seed:
 
 
 @profile
-def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_metric:str, seed:int, resolutions:Iterable, addl_genes:Iterable, paths_config:PathConfig) -> AnnData:
+def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_metric:str, seed:int, resolutions:Iterable, addl_genes:Iterable, h5ad_save_name:Path, paths_config:PathConfig) -> AnnData:
     logging.info("Identify neighbors, generate UMAP embeddings, calulate clustering resolutions")
 
     '''
@@ -638,7 +635,7 @@ def neighbors_umap_clust(anndata_obj:AnnData, n_neighbors:int, n_pcs:int, dist_m
 
      # at the end of this function, the active layer (.X) will be normalized, regressed and scaled counts for all genes
      # but there will be added PCA calculations and data to obsm, varm, and uns
-    anndata_obj.write(filename = paths_config.filtered_h5ad,
+    anndata_obj.write(filename = h5ad_save_name,
         convert_strings_to_categoricals = True,
         compression = "gzip")
 
